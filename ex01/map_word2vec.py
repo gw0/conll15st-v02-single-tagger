@@ -32,9 +32,10 @@ def strip_phrase(text, _pats=None):
     """Strip phrase to basic lowercase alphanumeric characters."""
     if _pats is None:
         _pats = [
-            (re.compile("[^a-z0-9#\\.,;/%]"), ""),
-            (re.compile("[0-9][0-9]"), "##"),
-            (re.compile("##[0-9]"), "###"),
+            (re.compile("[^a-z0-9#\\.,;/%$]"), ""),
+            (re.compile("[0-9]+"), "#"),
+            #(re.compile("[0-9][0-9]"), "##"),
+            #(re.compile("##[0-9]"), "###"),
         ]
 
     strip = text.lower()
@@ -44,13 +45,21 @@ def strip_phrase(text, _pats=None):
 
 
 @common.profile
-def map_strip_base(vocab_base):
+def map_strip_base(vocab_base, get_count=None):
     """Build mapping of stripped helper vocabulary to base vocabulary."""
+    if get_count is None:
+        get_count = lambda vocab, token: vocab[token].count
 
     vocab_strip = {}
     for token in vocab_base:
         strip = strip_phrase(token)
-        vocab_strip[strip] = token
+        if strip not in vocab_strip:
+            vocab_strip[strip] = token
+        else:
+            cnt_cur = get_count(vocab_base, vocab_strip[strip])
+            cnt_new = get_count(vocab_base, token)
+            if cnt_new > cnt_cur:
+                vocab_strip[strip] = token
     return vocab_strip
 
 @common.profile
@@ -59,7 +68,7 @@ def map_sent_base(sentences, vocab_base, vocab_strip=None, longest=True, max_len
     if vocab_strip is None:
         vocab_strip = {}
 
-    pat = re.compile("[^a-z0-9#\\.,;/%]")
+    pat = re.compile("[^a-z0-9#\\.,;/%$]")
 
     vocab_sent = {}
     missing = {}
@@ -86,7 +95,7 @@ def map_sent_base(sentences, vocab_base, vocab_strip=None, longest=True, max_len
                         continue
 
                 # phrase check
-                if pat.sub("", text_list[0]) or pat.sub("", text_list[-1]) == "":
+                if pat.sub("", text_list[0]) == "" or pat.sub("", text_list[-1]) == "":
                     continue
 
                 # lower case, strip non-alphanumeric, strip numbers
@@ -103,7 +112,7 @@ def map_sent_base(sentences, vocab_base, vocab_strip=None, longest=True, max_len
                     missing[text] += 1
                 except KeyError:
                     missing[text] = 1
-                    log.debug("- not in word2vec: {} ({})".format(text, strip))
+                    log.debug("- not in word2vec: {}".format(text))
     return vocab_sent, missing, cnt
 
 ### PDTB parses
