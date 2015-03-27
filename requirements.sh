@@ -18,10 +18,15 @@ sudo aptitude install python-numpy=1:1.8.2-2 python-scipy=0.14.0-2
 [ -d $DIST_PACKAGES/numpy ] && cp -a $DIST_PACKAGES/numpy* $SITE_PACKAGES
 [ -d $DIST_PACKAGES/scipy ] && cp -a $DIST_PACKAGES/scipy* $SITE_PACKAGES
 
+# Prerequisites for matplotlib
+sudo aptitude install libfreetype6-dev
+
 # Requirements
 pip install joblib
 pip install gensim
 pip install theano
+pip install tabulate
+pip install matplotlib
 
 echo
 echo "Use: . venv/bin/activate"
