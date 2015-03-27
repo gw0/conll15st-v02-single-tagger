@@ -2,27 +2,26 @@
 # -*- coding: utf-8 -*-
 # pylint: disable=C0103,C0326,W0621
 """
-Map vocabulary to word2vec vectors for conll15st experiment 01.
+Map vocabulary to word2vec vectors for CoNLL 2015 experiment 01 (Shallow Discourse Parsing).
 
-Usage: ./map_word2vec.py <model_dir> <word2vec_bin> <parses_json>
+Usage: ./data_word2vec.py <model_dir> <word2vec_bin> <pdtb_dir>...
 
-  - <model_dir>: directory for storing mapping and other resources
-  - <word2vec_bin>: existing word2vec model in C binary format
-  - <parses_json>: conll15st automatic PDTB parses in JSON format
+- <model_dir>: directory for storing trained model and other resources
+- <word2vec_bin>: existing word2vec model in C binary format
+- <pdtb_dir>: conll15st dataset directory with PDTB parses and raw texts
 
-> ./map_word2vec.py ex01_model GoogleNews-vectors-negative300.bin.gz pdtb_trial_parses.json
+> ./data_word2vec.py ex01_model GoogleNews-vectors-negative300.bin.gz conll15-st-trial/
 """
 __author__ = "GW [http://gw.tnode.com/] <gw.2015@tnode.com>"
 __license__ = "GPLv3+"
 
-import sys
-import fileinput
-import json
+import argparse
 import re
 
 from gensim.models import word2vec
 
 import common
+import data_pdtb
 log = common.logging.getLogger(__name__)
 
 
@@ -50,7 +49,7 @@ def map_strips_base(strip_helpers, base_vocab, get_count=None):
     return strip_vocabs
 
 @common.profile
-def map_sent_base(sentences, base_vocab, strip_helpers=None, strip_vocabs=None, longest=True, max_len=5, delimiter="_"):
+def map_sent_base(sentences, base_vocab, strip_helpers=None, strip_vocabs=None, only_longest=True, max_len=5, delimiter="_"):
     """Build mapping of words/phrases in sentences to base vocabulary."""
     if strip_helpers is None:
         strip_helpers = []
@@ -70,7 +69,7 @@ def map_sent_base(sentences, base_vocab, strip_helpers=None, strip_vocabs=None, 
 
             for j in range(min(i + max_len, len(sentence)), i, -1):
                 # already matched
-                text_list = [ sentence[k]['Text']  for k in range(i, j) ]
+                text_list = sentence[i:j]
                 text = delimiter.join(text_list)
                 if text in sent_vocab:
                     break
@@ -78,7 +77,7 @@ def map_sent_base(sentences, base_vocab, strip_helpers=None, strip_vocabs=None, 
                 # direct match
                 if text in base_vocab:
                     sent_vocab[text] = text
-                    if longest:
+                    if only_longest:
                         break
                     else:
                         continue
@@ -101,7 +100,7 @@ def map_sent_base(sentences, base_vocab, strip_helpers=None, strip_vocabs=None, 
                         sent_vocab[text] = strip_vocab[strip]
                         break
                 if strip in strip_vocab:
-                    if longest:
+                    if only_longest:
                        break
                     else:
                         continue
@@ -113,42 +112,6 @@ def map_sent_base(sentences, base_vocab, strip_helpers=None, strip_vocabs=None, 
                     missing[text] = 1
                     log.debug("- not in word2vec: {}".format(text))
     return sent_vocab, missing, cnt
-
-### PDTB parses
-
-class PDTBParsesCorpus(object):
-    """Iterate over sentences from the PDTB parses corpus."""
-
-    def __init__(self, fname, reg_split=None):
-        self.fname = fname
-        self.reg_split = reg_split
-
-    def __iter__(self):
-        for line in fileinput.input(self.fname):
-            log.debug("- loading PDTB parses line (size {})".format(len(line)))
-            parses_dict = json.loads(line)
-
-            for doc_id in parses_dict:
-                token_id = 0  # token offset within document
-                sentence_id = 0  # sentence offset within document
-
-                for sentence_dict in parses_dict[doc_id]['sentences']:
-                    sentence_token_id = token_id
-
-                    sentence = []
-                    for token in sentence_dict['words']:
-                        for word in re.split(self.reg_split, token[0]):
-                            sentence.append({
-                                'Text': word,
-                                'DocID': doc_id,
-                                'TokenList': [token_id],
-                                'SentenceID': sentence_id,
-                                'SentenceToken': sentence_token_id,
-                            })
-                        token_id += 1
-
-                    yield sentence
-                    sentence_id += 1
 
 
 ### Word2vec model
@@ -178,7 +141,7 @@ def map_base_word2vec(base_vocab, model):
 ### General
 
 @common.cache
-def build(word2vec_bin, parses_json):
+def build(word2vec_bin, pdtb_dirs):
     log.info("Loading word2vec model '{}'...".format(word2vec_bin))
     model = load_word2vec(word2vec_bin)
 
@@ -199,9 +162,9 @@ def build(word2vec_bin, parses_json):
     ]
     model_strips = map_strips_base(strip_helpers, model.vocab)
 
-    log.info("Mapping words/phrases from {}...".format(parses_json))
-    sentences_iter = PDTBParsesCorpus(parses_json, reg_split="-|\\\\/")
-    vocab, missing, total_cnt = map_sent_base(sentences_iter, model.vocab, strip_helpers=strip_helpers, strip_vocabs=model_strips, longest=True)
+    log.info("Mapping words/phrases from {}...".format(pdtb_dirs))
+    it = data_pdtb.PDTBParsesCorpus(pdtb_dirs, with_document=False, with_paragraph=False, with_sentence=True, word_split="-|\\\\/", word_meta=False)
+    vocab, missing, total_cnt = map_sent_base(it, model.vocab, strip_helpers=strip_helpers, strip_vocabs=model_strips, only_longest=True)
     log.info("- mappings: {}, missing: {}, total words: {}".format(len(vocab), len(missing), total_cnt))
 
     log.info("Mapping vocabulary to word2vec vectors...")
@@ -212,17 +175,24 @@ def build(word2vec_bin, parses_json):
 
 
 if __name__ == '__main__':
-    model_dir = sys.argv[1]
-    word2vec_bin = sys.argv[2]
-    parses_json = sys.argv[3].split(",")
-    map_word2vec_dump = "{}/map_word2vec.dump".format(model_dir)
-    vocab_dump = "{}/map_word2vec_vocab.dump".format(model_dir)
-    missing_dump = "{}/map_word2vec_missing.dump".format(model_dir)
+    # parse arguments
+    argp = argparse.ArgumentParser(description="Map vocabulary to word2vec vectors for CoNLL 2015 experiment 01 (Shallow Discourse Parsing).")
+    argp.add_argument('model_dir',
+        help="directory for storing trained model and other resources")
+    argp.add_argument('word2vec_bin',
+        help="existing word2vec model in C binary format")
+    argp.add_argument('pdtb_dir', nargs='+',
+        help="conll15st dataset directory with PDTB parses and raw texts")
+    args = argp.parse_args()
+
+    map_word2vec_dump = "{}/map_word2vec.dump".format(args.model_dir)
+    vocab_dump = "{}/map_word2vec_vocab.dump".format(args.model_dir)
+    missing_dump = "{}/map_word2vec_missing.dump".format(args.model_dir)
 
     log.info("Building...")
-    map_word2vec, vocab, missing = build(word2vec_bin, parses_json)
+    map_word2vec, vocab, missing = build(args.word2vec_bin, args.pdtb_dir)
 
-    log.info("Saving to '{}'...".format(model_dir))
+    log.info("Saving to '{}'...".format(args.model_dir))
     import os
     for dump in [map_word2vec_dump, vocab_dump, missing_dump]:
         dump_dir = os.path.dirname(dump)
@@ -233,6 +203,7 @@ if __name__ == '__main__':
     joblib.dump(vocab, vocab_dump, compress=1)
     joblib.dump(missing, missing_dump, compress=1)
 
-#map_word2vec = joblib.load("ex01_model/map_word2vec.dump")
-#vocab = joblib.load("ex01_model/map_word2vec_vocab.dump")
-#missing = joblib.load("ex01_model/map_word2vec_missing.dump")
+    #XXX
+    #map_word2vec = joblib.load("ex01_model/map_word2vec.dump")
+    #vocab = joblib.load("ex01_model/map_word2vec_vocab.dump")
+    #missing = joblib.load("ex01_model/map_word2vec_missing.dump")
