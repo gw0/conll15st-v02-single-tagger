@@ -164,7 +164,7 @@ def build(word2vec_bin, pdtb_dirs):
 
     log.info("Mapping words/phrases from {}...".format(pdtb_dirs))
     it = data_pdtb.PDTBParsesCorpus(pdtb_dirs, with_document=False, with_paragraph=False, with_sentence=True, word_split="-|\\\\/", word_meta=False)
-    vocab, missing, total_cnt = map_sent_base(it, model.vocab, strip_helpers=strip_helpers, strip_vocabs=model_strips, only_longest=True)
+    vocab, missing, total_cnt = map_sent_base(it, model.vocab, strip_helpers=strip_helpers, strip_vocabs=model_strips, only_longest=False)
     log.info("- mappings: {}, missing: {}, total words: {}".format(len(vocab), len(missing), total_cnt))
 
     log.info("Mapping vocabulary to word2vec vectors...")

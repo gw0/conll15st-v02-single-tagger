@@ -12,7 +12,6 @@ __author__ = "GW [http://gw.tnode.com/] <gw.2015@tnode.com>"
 __license__ = "GPLv3+"
 
 import argparse
-import codecs
 import json
 import re
 
@@ -53,7 +52,7 @@ class PDTBParsesCorpus(object):
                 return re.split(self.word_split, token)
 
         for pdtb_dir in self.pdtb_dirs:
-            f = codecs.open(self.parses_ffmt.format(pdtb_dir), 'r', 'utf-8')
+            f = open(self.parses_ffmt.format(pdtb_dir), 'r')
 
             for line in f:
                 log.debug("- loading PDTB parses line (size {})".format(len(line)))
@@ -67,7 +66,7 @@ class PDTBParsesCorpus(object):
                     sentence_level = []
                     token_id = 0  # token number within document
 
-                    fraw = codecs.open(self.raw_ffmt.format(pdtb_dir, doc_id), 'r', 'utf-8')
+                    fraw = open(self.raw_ffmt.format(pdtb_dir, doc_id), 'r')
                     prev_token_end = 0  # previous token last character offset
 
                     for sentence_dict in parses_dict[doc_id]['sentences']:
