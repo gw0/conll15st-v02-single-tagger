@@ -87,93 +87,15 @@ class RNN_deep(object):
         # compile theano functions
         self.predict = theano.function(inputs=[x], outputs=y_pred)
         self.train = theano.function(inputs=[x, y, learn_rate], outputs=[cost, T.min(y_pred), T.max(y_pred
-            ), T.mean(y_pred), y_pred], updates=updates)
+            ), T.mean(y_pred)], updates=updates)
 
+    def save(self, dir):
+        for param in self.params:
+            joblib.dump(param.get_value(), "{}/{}.dump".format(dir, param.name), compress=0)
 
-def extract_relations(doc_id, doc, y, tag_to_j, all_tsenses, thres=0.5):
-    # Find all relations above threshold
-
-    for tsense in all_tsenses:
-        rtype, sense = tsense.split(":")
-
-        rnum = 0
-        while rnum >= 0:
-            relation = {}
-            relation['DocID'] = doc_id
-            relation['Type'] = rtype
-            relation['Sense'] = [sense]
-
-            relation_len = 0
-            for part in ['Arg1', 'Arg2', 'Connective']:
-                relation[part] = {'TokenList': []}
-                if relation['Type'] == 'Implicit' and part == 'Connective':
-                    continue
-
-                tag = "{0}:{1}:{2}:{3}".format(rtype, sense, rnum, part)
-                if tag not in tag_to_j:
-                    rnum = -1
-                    break
-
-                # transform to token list
-                j = tag_to_j[tag]
-                token_list = {}
-                for word, tags in zip(doc, y):
-                    if tags[j] > thres:
-                        for k in word['TokenList']:
-                            token_list[k] = 1
-                relation[part]['TokenList'] = sorted(token_list.keys())
-                relation_len += len(relation[part]['TokenList'])
-
-            if rnum < 0:
-                break
-            print tsense, len(relation['Arg1']['TokenList']), len(relation['Arg2']['TokenList']), len(relation['Connective']['TokenList'])
-            if len(relation['Arg1']['TokenList']) > 2 and len(relation['Arg2']['TokenList']) > 2 and relation_len < 300:
-                yield relation
-            rnum += 1
-
-
-def load(pdtb_dir, word2vec_bin, word2vec_dim, tag_to_j):
-    """Load PDTB data and transform it to numerical form."""
-
-    parses_ffmt = "{}/pdtb-parses.json"
-    relations_ffmt = "{}/pdtb-data.json"
-    raw_ffmt = "{}/raw/{}"
-
-    # load relations
-    relations = load_relations(relations_ffmt.format(pdtb_dir), tag_to_j)
-
-    # prepare mapping vocabulary to word2vec vectors
-    map_word2vec = joblib.load("./cache/map_word2vec.dump")
-
-    # load words from PDTB parses
-    words = load_words(pdtb_dir, relations)
-
-    # prepare numeric form
-    x = []
-    y = []
-    for doc_id, doc in words.iteritems():
-        doc_x = []
-        doc_y = []
-        for word in doc:
-            # map text to word2vec
-            try:
-                doc_x.append(map_word2vec[word['Text']])
-            except KeyError:  # missing in vocab
-                doc_x.append(np.zeros(word2vec_dim))
-
-            # map tags to vector
-            tags = [0.0] * len(tag_to_j)
-            for tag, count in word['Tags'].iteritems():
-                tags[tag_to_j[tag]] = float(count)
-            doc_y.append(tags)
-
-            #print word['Text'], word['Tags']
-            #print word['Text'], doc_x[-1][0:1], doc_y[-1]
-
-        x.append(np.asarray(doc_x, dtype=np.float32))
-        y.append(np.asarray(doc_y, dtype=np.float32))
-
-    return x, y, words, relations
+    def load(self, dir):
+        for param in self.params:
+            param.set_value(joblib.load("{}/{}.dump".format(dir, param.name)))
 
 
 def relation_to_tag(relation, rpart):
@@ -182,7 +104,7 @@ def relation_to_tag(relation, rpart):
     rtype = relation['Type']
     rsense = relation['Sense'][0]  # assume only first sense
     rnum = relation['SenseNum'][0]  # assume only first sense
-    return ":".join([rtype, rsense, str(rnum), rpart])
+    return ":".join([rtype, rsense, rnum, rpart])
 
 
 def load_relations(relations_json, tag_to_j):
@@ -248,7 +170,7 @@ def load_relations(relations_json, tag_to_j):
                 rnums[rnum_key] += 1
             except KeyError:
                 rnums[rnum_key] = 1
-            relation['SenseNum'] = [rnums[rnum_key]]
+            relation['SenseNum'] = [str(rnums[rnum_key])]
 
             for rpart in ['Arg1', 'Arg2', 'Connective']:
                 if relation_to_tag(relation, rpart) in tag_to_j:  # relation found
@@ -304,6 +226,108 @@ def load_words(pdtb_dir, relations):
     return words
 
 
+def load(pdtb_dir, word2vec_bin, word2vec_dim, tag_to_j):
+    """Load PDTB data and transform it to numerical form."""
+
+    parses_ffmt = "{}/pdtb-parses.json"
+    relations_ffmt = "{}/pdtb-data.json"
+    raw_ffmt = "{}/raw/{}"
+
+    # load relations
+    relations = load_relations(relations_ffmt.format(pdtb_dir), tag_to_j)
+
+    # prepare mapping vocabulary to word2vec vectors
+    map_word2vec = joblib.load("./ex02_model/map_word2vec.dump")  #XXX
+
+    # load words from PDTB parses
+    words = load_words(pdtb_dir, relations)
+
+    # prepare numeric form
+    x = []
+    y = []
+    doc_ids = []
+    for doc_id, doc in words.iteritems():
+        doc_x = []
+        doc_y = []
+        for word in doc:
+            # map text to word2vec
+            try:
+                doc_x.append(map_word2vec[word['Text']])
+            except KeyError:  # missing in vocab
+                doc_x.append(np.zeros(word2vec_dim))
+
+            # map tags to vector
+            tags = [0.0] * len(tag_to_j)
+            for tag, count in word['Tags'].iteritems():
+                tags[tag_to_j[tag]] = float(count)
+            doc_y.append(tags)
+
+            #print word['Text'], word['Tags']
+            #print word['Text'], doc_x[-1][0:1], doc_y[-1]
+
+        x.append(np.asarray(doc_x, dtype=np.float32))
+        y.append(np.asarray(doc_y, dtype=np.float32))
+        doc_ids.append(doc_id)
+
+    return x, y, doc_ids, words, relations
+
+
+def extract_relations(y, tag_to_j, words, thres=0.5):
+    """Extract all relations above threshold into PDTB format."""
+
+    doc_id = words[0]['DocID']
+
+    # iterate through all tags
+    relations_dict = {}
+    for tag in tag_to_j:
+        rtype, rsense, rnum, rpart = tag.split(":")
+        relation_key = (rtype, rsense, rnum)
+
+        if relation_key in relations_dict:  # previous relation
+            relation = relations_dict[relation_key]
+        else:  # new relation
+            relation = {}
+            relation['DocID'] = doc_id
+            relation['Type'] = rtype
+            relation['Sense'] = [rsense]
+            relation['SenseNum'] = [rnum]
+            relation['Arg1'] = {'TokenList': []}
+            relation['Arg2'] = {'TokenList': []}
+            relation['Connective'] = {'TokenList': []}
+            relations_dict[relation_key] = relation
+
+        # transform to token list
+        j = tag_to_j[tag]
+        token_list = {}
+        for word, tags in zip(words, y):
+            if tags[j] > thres:
+                for k in word['TokenList']:
+                    token_list[k] = 1
+        relation[rpart]['TokenList'] = sorted(token_list.keys())
+
+        if rtype == 'Implicit' and rpart == 'Connective':  # invalid case
+            relation[rpart]['TokenList'] = []
+
+    # extract meaningful relations
+    relations = []
+    for relation in relations_dict.itervalues():
+        arg1_len = len(relation['Arg1']['TokenList'])
+        arg2_len = len(relation['Arg2']['TokenList'])
+        conn_len = len(relation['Connective']['TokenList'])
+        print ":".join([rtype, rsense, rnum]), arg1_len, arg2_len, conn_len
+        if arg1_len > 2 and arg2_len > 2 and (arg1_len + arg2_len + conn_len) < 300:
+            relations.append(relation)
+
+    # check relations
+    #for relation in relations:
+    #    validator.check_type(relation)    
+    #    validator.check_sense(relation)
+    #    validator.check_args(relation)
+    #    validator.check_connective(relation)
+
+    return relations
+
+
 if __name__ == '__main__':
     # parse arguments
     argp = argparse.ArgumentParser(description="Run experiment 02 for CoNLL 2015 (Shallow Discourse Parsing).")
@@ -329,19 +353,24 @@ if __name__ == '__main__':
     tag_to_j["Explicit:Expansion.Conjunction:1:Arg2"] = len(tag_to_j)
     tag_to_j["Explicit:Expansion.Conjunction:1:Connective"] = len(tag_to_j)
 
-    x_train, y_train, train_words, train_relations = load(args.train_dir, word2vec_bin, word2vec_dim, tag_to_j)
-    #x_valid, y_valid, valid_words, valid_relations = load(args.valid_dir, word2vec_bin, word2vec_dim, tag_to_j)
-    #x_test, _, valid_words, _ = load(args.test_dir, word2vec_bin, word2vec_dim, tag_to_j)
-    x_valid, y_valid, valid_words, valid_relations = x_train, y_train, train_words, train_relations
-    x_test, _, valid_words, _ = x_train, y_train, train_words, train_relations
+    x_train, y_train, train_doc_ids, train_words, train_relations = load(args.train_dir, word2vec_bin, word2vec_dim, tag_to_j)
+    #x_valid, y_valid, valid_doc_ids, valid_words, valid_relations = load(args.valid_dir, word2vec_bin, word2vec_dim, tag_to_j)
+    #x_test, _, test_doc_ids, test_words, _ = load(args.test_dir, word2vec_bin, word2vec_dim, tag_to_j)
+    x_valid, y_valid, valid_doc_ids, valid_words, valid_relations = x_train, y_train, train_doc_ids, train_words, train_relations
+    x_test, _, test_doc_ids, test_words, _ = x_train, y_train, train_doc_ids, train_words, train_relations
 
+    train_words_list = [ train_words[doc_id]  for doc_id in train_doc_ids ]
+    train_relations_list = [ r  for doc_id in train_doc_ids for r in train_relations[doc_id] ]
+    valid_words_list = [ valid_words[doc_id]  for doc_id in valid_doc_ids ]
+    valid_relations_list = [ r  for doc_id in valid_doc_ids for r in valid_relations[doc_id] ]
+
+    # test generate perfect output
     #import copy
-    #train_relations_out = copy.deepcopy(train_relations[doc_id])
+    #train_relations_out = copy.deepcopy(train_relations["wsj_1000"])
     #for relation in train_relations_out:
     #    relation['Arg1']['TokenList'] = [ t[2]  for t in relation['Arg1']['TokenList'] ]
     #    relation['Arg2']['TokenList'] = [ t[2]  for t in relation['Arg2']['TokenList'] ]
     #    relation['Connective']['TokenList'] = [ t[2]  for t in relation['Connective']['TokenList'] ]
-
 
     # settings
     rand_seed = int(time.time())
@@ -353,6 +382,7 @@ if __name__ == '__main__':
     x_dim = 300
     hidden_dim = 30  #XXX: x_dim
     y_dim = len(tag_to_j)
+    valid_freq = 1
 
     # instantiate the model
     print "rand_seed={0}".format(rand_seed)
@@ -360,48 +390,48 @@ if __name__ == '__main__':
     rnn = RNN_deep(x_dim=x_dim, hidden_dim=hidden_dim, y_dim=y_dim)
 
     # iterate through train dataset
-    best_cost = np.inf
+    best_train_cost = np.inf
+    best_train_epoch = 0
     best_f1 = -np.inf
     best_epoch = 0
+    best_rnn = rnn
     epoch = 0
     while epoch < epochs or learn_rate > decay_min:
 
         # train model
         t = time.time()
         for i, (x, y) in enumerate(zip(x_train, y_train)):
-            cost, y_min, y_max, y_mean, y = rnn.train(x, y, np.array(learn_rate, dtype=np.float32))
-            print "learning epoch {} ({:.2f}%) ({:.2f} sec), rate {:.2e}, train cost {}{}".format(epoch, (i + 1) * 100.0 / len(x_train), time.time() - t, learn_rate, cost, (" +" if cost < best_cost else ""))
+            cost, y_min, y_max, y_mean = rnn.train(x, y, np.array(learn_rate, dtype=np.float32))
+
+            print "learning epoch {} ({:.2f}%) ({:.2f} sec), rate {:.2e}, train cost {}{}".format(epoch, (i + 1) * 100.0 / len(x_train), time.time() - t, learn_rate, cost, (" +" if cost < best_train_cost else ""))
             print y_min, y_max, y_mean
-            if cost < best_cost:
-                best_cost = cost
+            if cost < best_train_cost:
+                best_train_cost = cost
+                best_train_epoch = epoch
+
+        # validate model
+        if epoch % valid_freq == 0:
+            y_relations = []
+            for i, (x, y, words) in enumerate(zip(x_valid, y_valid, valid_words_list)):
+                y_pred = rnn.predict(x)
+
+                # extract relations from current document
+                y_relations.extend(extract_relations(y_pred, tag_to_j, words))
+
+            # evaluate all relations
+            precision, recall, f1 = scorer.evaluate_relation(valid_relations_list, y_relations)
+            print "valid set: precision {0:.2f}, recall {1:.2f}, f1 {2:.2f}".format(precision, recall, f1)
+            if f1 < best_f1:  # save best model
+                best_f1 = f1
                 best_epoch = epoch
-
-        # predict with model
-        y = rnn.predict(x_train[0])
-
-        # extract relations
-        doc_id = "wsj_1000"
-        y_relations = []
-        for relation in extract_relations(doc_id, train_words[doc_id], y, tag_to_j):
-            y_relations.append(relation)
-
-            # check relations
-            validator.check_type(relation)    
-            validator.check_sense(relation)
-            validator.check_args(relation)
-            validator.check_connective(relation)
-
-        # evaluate relations
-        try:
-            precision, recall, f1 = scorer.evaluate_relation(train_relations[doc_id], y_relations)
-            print "evaluate train set precision {0:.2f}, recall {1:.2f}, f1 {2:.2f}".format(precision, recall, f1)
-        except ZeroDivisionError:
-            precision, recall, f1 = 0.0, 0.0, 0.0
-        if f1 == 1.0:
-            print "WOOHOO!!!"
-            break
+                best_rnn = copy.deepcopy(rnn)
+                rnn.save(args.model_dir)
+            if f1 >= 1.0:  # perfect
+                print "WOOHOO!!!"
+                break
 
         # learning rate decay if no improvement after some epochs
-        if epoch - best_epoch >= decay_after:
+        if epoch - best_train_epoch >= decay_after:
             learn_rate *= decay_rate
+            rnn = best_rnn
         epoch += 1
