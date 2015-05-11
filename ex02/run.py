@@ -27,6 +27,7 @@ from scorer import scorer, validator
 log = common.logging.getLogger(__name__)
 
 # debugging
+theano.config.floatX = 'float32'
 import socket
 if socket.gethostname() == "elite":
     theano.config.optimizer = 'fast_compile'
@@ -36,16 +37,16 @@ if socket.gethostname() == "elite":
 # similar to https://github.com/lisa-lab/DeepLearningTutorials/blob/master/code/rnnslu.py
 class RNN_deep(object):
 
-    def __init__(self, x_dim, hidden_dim, y_dim):
+    def __init__(self, x_dim, hidden_dim, y_dim, w_spread, p_drop):
 
         # parameters of the model
-        self.wx = theano.shared(name="wx", value=0.1 * np.random.uniform(-1.0, 1.0, (x_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX))
-        self.hx_0 = theano.shared(name="hx_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX))
+        self.wx = theano.shared(name="wx", value=w_spread * np.random.uniform(-1.0, 1.0, (x_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.hx_0 = theano.shared(name="hx_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
 
-        self.w1 = theano.shared(name="w1", value=0.1 * np.random.uniform(-1.0, 1.0, (hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX))
-        self.h1_0 = theano.shared(name="h1_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX))
+        self.w1 = theano.shared(name="w1", value=w_spread * np.random.uniform(-1.0, 1.0, (hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.h1_0 = theano.shared(name="h1_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
 
-        self.wy = theano.shared(name="wy", value=0.1 * np.random.uniform(-1.0, 1.0, (hidden_dim + 1, y_dim)).astype(theano.config.floatX))
+        self.wy = theano.shared(name="wy", value=w_spread * np.random.uniform(-1.0, 1.0, (hidden_dim + 1, y_dim)).astype(theano.config.floatX), borrow=True)
 
         # bundle
         self.params = [self.wx, self.hx_0, self.w1, self.h1_0, self.wy]
@@ -62,13 +63,79 @@ class RNN_deep(object):
         #activation = lambda x: x * ((x > 0) + 0.01)
         #activation = lambda x: T.minimum(x * (x > 0), 6)  # capped reLU
 
-        def recurrence(x_cur, hx_prev, h1_prev):
-            hx = activation(T.dot(T.concatenate([x_cur, hx_prev, [1.0]]), self.wx))
-            h1 = activation(T.dot(T.concatenate([hx, h1_prev, [1.0]]), self.w1))
-            y_pred = activation(T.dot(T.concatenate([h1, [1.0]]), self.wy))
-            return (hx, h1, y_pred)
+        #def sgd(cost, params, learn_rate):
+        #    gradients = T.grad(cost, wrt=params)
+        #    updates = [ (p, p - learn_rate * g)  for p, g in zip(params, gradients) ]
+        #    return updates
 
-        (hx, h1, y_pred), _ = theano.scan(fn=recurrence, sequences=x, outputs_info=[self.hx_0, self.h1_0, None], n_steps=x.shape[0])
+        #def rmsprop(cost, params, learn_rate=0.01, rho=0.9, epsilon=1e-6):
+        #    grads = T.grad(cost=cost, wrt=params)
+        #    updates = []
+        #    for p, g in zip(params, grads):
+        #        acc = theano.shared(p.get_value() * 0.)
+        #        acc_new = rho * acc + (1 - rho) * g ** 2
+        #        gradient_scaling = T.sqrt(acc_new + epsilon)
+        #        g = g / gradient_scaling
+        #        updates.append((acc, acc_new))
+        #        updates.append((p, p - learn_rate * g))
+        #    return updates
+
+        def adam(loss, all_params, learn_rate=0.001, b1=0.9, b2=0.999, e=1e-8, gamma=1-1e-8):
+            """ADAM update rules
+            
+            Kingma, Diederik, and Jimmy Ba. "Adam: A Method for Stochastic Optimization." arXiv preprint arXiv:1412.6980 (2014). http://arxiv.org/pdf/1412.6980v4.pdf
+            """
+            updates = []
+            all_grads = theano.grad(loss, all_params)
+            alpha = learn_rate
+            t = theano.shared(np.float32(1.0))
+            b1_t = b1 * gamma ** (t - 1.0)   # decay the first moment running average coefficient
+         
+            for theta_prev, g in zip(all_params, all_grads):
+                m_prev = theano.shared(np.zeros(theta_prev.get_value().shape, dtype=theano.config.floatX))
+                v_prev = theano.shared(np.zeros(theta_prev.get_value().shape, dtype=theano.config.floatX))
+
+                m = b1_t * m_prev + (1. - b1_t) * g  # update biased first moment estimate
+                v = b2 * v_prev + (1. - b2) * g ** 2  # update biased second raw moment estimate
+                m_hat = m / (1. - b1 ** t)  # compute bias-corrected first moment estimate
+                v_hat = v / (1. - b2 ** t)  # compute bias-corrected second raw moment estimate
+                theta = theta_prev - (alpha * m_hat) / (T.sqrt(v_hat) + e)  # update parameters
+
+                updates.append((m_prev, m))
+                updates.append((v_prev, v))
+                updates.append((theta_prev, theta) )
+            updates.append((t, t + 1.))
+            return updates
+
+        srng = T.shared_randomstreams.RandomStreams(np.random.randint(999999))
+        def dropout_masks(p_drop, shapes):
+            masks = [ srng.binomial(n=1, p=np.float32(1.) - p_drop, size=shape, dtype=theano.config.floatX)  for shape in shapes ]
+            return masks
+        def dropout_apply(h, mask, p_drop):
+            if p_drop > 0.:
+                h = h * mask / np.float32(1. - p_drop)
+            return h
+
+        def model(x, wx, hx_0, w1, h1_0, wy, p_drop):
+
+            def recurrence(x_cur, hx_prev, h1_prev, masks):
+                one = np.float32(1.)
+                hx = activation(T.dot(T.concatenate([x_cur, hx_prev, [one]]), wx))
+                hx_ = dropout_apply(hx, masks[0], p_drop)
+                h1 = activation(T.dot(T.concatenate([hx_, h1_prev, [one]]), w1))
+                h1_ = dropout_apply(h1, masks[1], p_drop)
+                y_pred = activation(T.dot(T.concatenate([h1_, [one]]), wy))
+                return (hx, h1, y_pred)
+
+            if p_drop > 0.:
+                masks = dropout_masks(theano.shared(np.float32(p_drop)), [ hx_0.shape, h1_0.shape ])
+            else:
+                masks = []
+            (_, _, y_pred), _ = theano.scan(fn=recurrence, sequences=x, non_sequences=[masks], outputs_info=[hx_0, h1_0, None], n_steps=x.shape[0])
+            return y_pred
+
+        y_pred = model(x, self.wx, self.hx_0, self.w1, self.h1_0, self.wy, 0.)
+        y_noise = model(x, self.wx, self.hx_0, self.w1, self.h1_0, self.wy, p_drop)
 
         #loss = lambda y_pred, y: T.mean((y_pred - y) ** 2)  # MSE
         #loss = lambda y_pred, y: T.sum((y_pred - y) ** 16) ** (1.0/16)
@@ -81,14 +148,14 @@ class RNN_deep(object):
         l2 = T.mean(self.wx ** 2) + T.mean(self.w1 ** 2) + T.mean(self.wy ** 2)
 
         # define gradients and updates
-        cost = loss(y_pred, y) + l1_reg * l1 + l2_reg * l2
-        gradients = T.grad(cost, wrt=self.params)
-        updates = OrderedDict((p, p - learn_rate * g)  for p, g in zip(self.params, gradients))
+        cost = loss(y_noise, y) + l1_reg * l1 + l2_reg * l2
+        #updates = sgd(cost, self.params, learn_rate)
+        #updates = rmsprop(cost, self.params, learn_rate)
+        updates = adam(cost, self.params, learn_rate)
 
         # compile theano functions
         self.predict = theano.function(inputs=[x], outputs=y_pred)
-        self.train = theano.function(inputs=[x, y, learn_rate], outputs=[cost, T.min(y_pred), T.max(y_pred
-            ), T.mean(y_pred)], updates=updates)
+        self.train = theano.function(inputs=[x, y, learn_rate], outputs=[cost, T.min(y_noise), T.max(y_noise), T.mean(y_noise)], updates=updates)
 
     def save(self, dir):
         for param in self.params:
@@ -96,7 +163,7 @@ class RNN_deep(object):
 
     def load(self, dir):
         for param in self.params:
-            param.set_value(joblib.load("{}/{}.dump".format(dir, param.name)))
+            param.set_value(joblib.load("{}/{}.dump".format(dir, param.name)), borrow=True)
 
 
 def relation_to_tag(relation, rpart):
@@ -174,6 +241,9 @@ def load_relations(relations_json, tag_to_j):
             relation['SenseNum'] = [str(rnums[rnum_key])]
 
             for rpart in ['Arg1', 'Arg2', 'Connective']:
+                #if rnums[rnum_key] == 5:
+                #    relation['SenseNum'] = [str(1)]
+                #    print relation_to_tag(relation, rpart)
                 if relation_to_tag(relation, rpart) in tag_to_j:  # relation found
                     relations[doc_id].append(relation)
                     break  # only one
@@ -267,8 +337,8 @@ def load(pdtb_dir, word2vec_bin, word2vec_dim, tag_to_j):
             #print word['Text'], word['Tags']
             #print word['Text'], doc_x[-1][0:1], doc_y[-1]
 
-        x.append(np.asarray(doc_x, dtype=np.float32))
-        y.append(np.asarray(doc_y, dtype=np.float32))
+        x.append(np.asarray(doc_x, dtype=theano.config.floatX))
+        y.append(np.asarray(doc_y, dtype=theano.config.floatX))
         doc_ids.append(doc_id)
         if doc_id not in relations:
             relations[doc_id] = []
@@ -318,9 +388,10 @@ def extract_relations(y, tag_to_j, words, thres=0.5):
         arg1_len = len(relation['Arg1']['TokenList'])
         arg2_len = len(relation['Arg2']['TokenList'])
         conn_len = len(relation['Connective']['TokenList'])
-        print ":".join([rtype, rsense, rnum]), arg1_len, arg2_len, conn_len
         if arg1_len > 2 and arg2_len > 2 and (arg1_len + arg2_len + conn_len) < 300:
             relations.append(relation)
+        #if (arg1_len + arg2_len + conn_len) > 0:
+        #    print ":".join([rtype, rsense, rnum]), arg1_len, arg2_len, conn_len
 
     # check relations
     #for relation in relations:
@@ -354,9 +425,11 @@ if __name__ == '__main__':
     word2vec_dim = 300
 
     tag_to_j = {}
-    tag_to_j["Explicit:Expansion.Conjunction:1:Arg1"] = len(tag_to_j)
-    tag_to_j["Explicit:Expansion.Conjunction:1:Arg2"] = len(tag_to_j)
-    tag_to_j["Explicit:Expansion.Conjunction:1:Connective"] = len(tag_to_j)
+    #tag_to_j["Explicit:Expansion.Conjunction:1:Arg1"] = len(tag_to_j)
+    #tag_to_j["Explicit:Expansion.Conjunction:1:Arg2"] = len(tag_to_j)
+    #tag_to_j["Explicit:Expansion.Conjunction:1:Connective"] = len(tag_to_j)
+    for i, tag in enumerate(data_pdtb.tags_rnum1_most5):
+        tag_to_j[tag] = i
 
     x_train, y_train, train_doc_ids, train_words, train_relations = load(args.train_dir, word2vec_bin, word2vec_dim, tag_to_j)
     x_valid, y_valid, valid_doc_ids, valid_words, valid_relations = load(args.valid_dir, word2vec_bin, word2vec_dim, tag_to_j)
@@ -378,20 +451,22 @@ if __name__ == '__main__':
     # settings
     log.info("instantiate model")
     rand_seed = int(time.time())
-    learn_rate = 0.01
-    decay_after = 2
-    decay_rate = 0.5
-    decay_min = 1e-8
+    learn_rate = 0.01  # dataset trial=0.01, dev=0.001
+    decay_after = 10
+    decay_rate = 0.9
+    decay_min = learn_rate * 1e-6
     epochs = 10000
-    x_dim = 300
+    x_dim = word2vec_dim
     hidden_dim = 60  #XXX: x_dim
     y_dim = len(tag_to_j)
+    w_spread = 0.1  # dim 30=0.1, 300=0.05
+    p_drop = 0.
     valid_freq = 1
 
     # instantiate the model
-    print "rand_seed={0}".format(rand_seed)
     np.random.seed(rand_seed)
-    rnn = RNN_deep(x_dim=x_dim, hidden_dim=hidden_dim, y_dim=y_dim)
+    rnn = RNN_deep(x_dim=x_dim, hidden_dim=hidden_dim, y_dim=y_dim, w_spread=w_spread, p_drop=p_drop)
+    #rnn.load(args.model_dir)
 
     # iterate through train dataset
     log.info("learning and evaluating")
@@ -410,7 +485,7 @@ if __name__ == '__main__':
         cost_max = -np.inf
         y_min_avg = y_max_avg = y_mean_avg = 0.0
         for i, (x, y) in enumerate(zip(x_train, y_train)):
-            cost, y_min, y_max, y_mean = rnn.train(x, y, np.array(learn_rate, dtype=np.float32))
+            cost, y_min, y_max, y_mean = rnn.train(x, y, np.float32(learn_rate))
             cost_avg += cost
             if cost < cost_min:
                 cost_min = cost
@@ -420,20 +495,21 @@ if __name__ == '__main__':
             y_max_avg += y_max
             y_mean_avg += y_mean
 
-            if i % 400 == 0:
+            if i % int(len(x_train) / 4 + 1) == 0 and time.time() - t > 10:
                 log.debug("learning epoch {} ({:.2f}%)".format(epoch, (i + 1) * 100.0 / len(x_train)))
         cost_avg /= len(x_train)
         y_min_avg /= len(x_train)
         y_max_avg /= len(x_train)
         y_mean_avg /= len(x_train)
-        log.info("learning epoch {} ({:.2f} sec), rate {:.2e}, train cost ({} {}) avg {}{}".format(epoch, time.time() - t, learn_rate, cost_min, cost_max, cost_avg, (" +" if cost_avg < best_train_cost else "  ")))
-        log.debug(" ".join([y_min_avg, y_max_avg, y_mean_avg]))
+        log.info("learning epoch {} ({:.2f} sec), rate {:.2e}, train cost ({:.4f} {:.4f}) avg {}{}".format(epoch, time.time() - t, learn_rate, float(cost_min), float(cost_max), cost_avg, (" +" if cost_avg < best_train_cost else "  ")))
+        log.debug("  {} {} {}".format(y_min_avg, y_max_avg, y_mean_avg))
         if cost_avg < best_train_cost:
             best_train_cost = cost_avg
             best_train_epoch = epoch
 
         # validate model
         if epoch % valid_freq == 0:
+            t = time.time()
             y_relations = []
             for i, (x, y, words) in enumerate(zip(x_valid, y_valid, valid_words_list)):
                 y_pred = rnn.predict(x)
@@ -443,14 +519,14 @@ if __name__ == '__main__':
 
             # evaluate all relations
             precision, recall, f1 = scorer.evaluate_relation(valid_relations_list, y_relations)
-            log.info("valid set: precision {0:.2f}, recall {1:.2f}, f1 {2:.2f}".format(precision, recall, f1))
+            log.info("valid set ({:.2f} sec): precision {:.2f}, recall {:.2f}, f1 {:.2f}".format(time.time() - t, precision, recall, f1))
             if f1 > best_f1:  # save best model
                 best_f1 = f1
                 best_epoch = epoch
                 #best_rnn = copy.deepcopy(rnn)
                 rnn.save(args.model_dir)
             if f1 >= 1.0:  # perfect
-                print "WOOHOO!!!"
+                print "  WOOHOO!!!"
                 break
 
         # learning rate decay if no improvement after some epochs
