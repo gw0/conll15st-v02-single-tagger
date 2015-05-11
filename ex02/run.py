@@ -16,6 +16,7 @@ import theano
 import theano.tensor as T
 
 import time
+import copy
 from collections import defaultdict
 from collections import OrderedDict
 
@@ -226,6 +227,7 @@ def load_words(pdtb_dir, relations):
     return words
 
 
+@common.cache
 def load(pdtb_dir, word2vec_bin, word2vec_dim, tag_to_j):
     """Load PDTB data and transform it to numerical form."""
 
@@ -268,6 +270,8 @@ def load(pdtb_dir, word2vec_bin, word2vec_dim, tag_to_j):
         x.append(np.asarray(doc_x, dtype=np.float32))
         y.append(np.asarray(doc_y, dtype=np.float32))
         doc_ids.append(doc_id)
+        if doc_id not in relations:
+            relations[doc_id] = []
 
     return x, y, doc_ids, words, relations
 
@@ -344,6 +348,7 @@ if __name__ == '__main__':
     args = argp.parse_args()
 
     # load data
+    log.info("load data")
     output_json = "{}/output.json".format(args.output_dir)
     word2vec_bin = "./GoogleNews-vectors-negative300.bin.gz"
     word2vec_dim = 300
@@ -354,10 +359,8 @@ if __name__ == '__main__':
     tag_to_j["Explicit:Expansion.Conjunction:1:Connective"] = len(tag_to_j)
 
     x_train, y_train, train_doc_ids, train_words, train_relations = load(args.train_dir, word2vec_bin, word2vec_dim, tag_to_j)
-    #x_valid, y_valid, valid_doc_ids, valid_words, valid_relations = load(args.valid_dir, word2vec_bin, word2vec_dim, tag_to_j)
-    #x_test, _, test_doc_ids, test_words, _ = load(args.test_dir, word2vec_bin, word2vec_dim, tag_to_j)
-    x_valid, y_valid, valid_doc_ids, valid_words, valid_relations = x_train, y_train, train_doc_ids, train_words, train_relations
-    x_test, _, test_doc_ids, test_words, _ = x_train, y_train, train_doc_ids, train_words, train_relations
+    x_valid, y_valid, valid_doc_ids, valid_words, valid_relations = load(args.valid_dir, word2vec_bin, word2vec_dim, tag_to_j)
+    x_test, _, test_doc_ids, test_words, _ = load(args.test_dir, word2vec_bin, word2vec_dim, tag_to_j)
 
     train_words_list = [ train_words[doc_id]  for doc_id in train_doc_ids ]
     train_relations_list = [ r  for doc_id in train_doc_ids for r in train_relations[doc_id] ]
@@ -373,14 +376,15 @@ if __name__ == '__main__':
     #    relation['Connective']['TokenList'] = [ t[2]  for t in relation['Connective']['TokenList'] ]
 
     # settings
+    log.info("instantiate model")
     rand_seed = int(time.time())
-    learn_rate = 0.1
-    decay_after = 10
-    decay_rate = 0.95
+    learn_rate = 0.01
+    decay_after = 2
+    decay_rate = 0.5
     decay_min = 1e-8
     epochs = 10000
     x_dim = 300
-    hidden_dim = 30  #XXX: x_dim
+    hidden_dim = 60  #XXX: x_dim
     y_dim = len(tag_to_j)
     valid_freq = 1
 
@@ -390,24 +394,43 @@ if __name__ == '__main__':
     rnn = RNN_deep(x_dim=x_dim, hidden_dim=hidden_dim, y_dim=y_dim)
 
     # iterate through train dataset
+    log.info("learning and evaluating")
     best_train_cost = np.inf
     best_train_epoch = 0
     best_f1 = -np.inf
     best_epoch = 0
-    best_rnn = rnn
+    #best_rnn = rnn
     epoch = 0
     while epoch < epochs or learn_rate > decay_min:
 
         # train model
         t = time.time()
+        cost_avg = 0.0
+        cost_min = np.inf
+        cost_max = -np.inf
+        y_min_avg = y_max_avg = y_mean_avg = 0.0
         for i, (x, y) in enumerate(zip(x_train, y_train)):
             cost, y_min, y_max, y_mean = rnn.train(x, y, np.array(learn_rate, dtype=np.float32))
+            cost_avg += cost
+            if cost < cost_min:
+                cost_min = cost
+            if cost > cost_max:
+                cost_max = cost
+            y_min_avg += y_min
+            y_max_avg += y_max
+            y_mean_avg += y_mean
 
-            print "learning epoch {} ({:.2f}%) ({:.2f} sec), rate {:.2e}, train cost {}{}".format(epoch, (i + 1) * 100.0 / len(x_train), time.time() - t, learn_rate, cost, (" +" if cost < best_train_cost else ""))
-            print y_min, y_max, y_mean
-            if cost < best_train_cost:
-                best_train_cost = cost
-                best_train_epoch = epoch
+            if i % 400 == 0:
+                log.debug("learning epoch {} ({:.2f}%)".format(epoch, (i + 1) * 100.0 / len(x_train)))
+        cost_avg /= len(x_train)
+        y_min_avg /= len(x_train)
+        y_max_avg /= len(x_train)
+        y_mean_avg /= len(x_train)
+        log.info("learning epoch {} ({:.2f} sec), rate {:.2e}, train cost ({} {}) avg {}{}".format(epoch, time.time() - t, learn_rate, cost_min, cost_max, cost_avg, (" +" if cost_avg < best_train_cost else "  ")))
+        log.debug(" ".join([y_min_avg, y_max_avg, y_mean_avg]))
+        if cost_avg < best_train_cost:
+            best_train_cost = cost_avg
+            best_train_epoch = epoch
 
         # validate model
         if epoch % valid_freq == 0:
@@ -420,11 +443,11 @@ if __name__ == '__main__':
 
             # evaluate all relations
             precision, recall, f1 = scorer.evaluate_relation(valid_relations_list, y_relations)
-            print "valid set: precision {0:.2f}, recall {1:.2f}, f1 {2:.2f}".format(precision, recall, f1)
-            if f1 < best_f1:  # save best model
+            log.info("valid set: precision {0:.2f}, recall {1:.2f}, f1 {2:.2f}".format(precision, recall, f1))
+            if f1 > best_f1:  # save best model
                 best_f1 = f1
                 best_epoch = epoch
-                best_rnn = copy.deepcopy(rnn)
+                #best_rnn = copy.deepcopy(rnn)
                 rnn.save(args.model_dir)
             if f1 >= 1.0:  # perfect
                 print "WOOHOO!!!"
@@ -433,5 +456,5 @@ if __name__ == '__main__':
         # learning rate decay if no improvement after some epochs
         if epoch - best_train_epoch >= decay_after:
             learn_rate *= decay_rate
-            rnn = best_rnn
+            #rnn = best_rnn
         epoch += 1
