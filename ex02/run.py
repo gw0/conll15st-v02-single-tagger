@@ -61,8 +61,8 @@ def adam(loss, all_params, learn_rate=0.001, b1=0.9, b2=0.999, e=1e-8, gamma=1-1
     updates = []
     all_grads = theano.grad(loss, all_params)
     alpha = learn_rate
-    t = theano.shared(np.float32(1.0))
-    b1_t = b1 * gamma ** (t - 1.0)   # decay the first moment running average coefficient
+    t = theano.shared(np.float32(1.))
+    b1_t = b1 * gamma ** (t - 1.)   # decay the first moment running average coefficient
 
     for theta_prev, g in zip(all_params, all_grads):
         m_prev = theano.shared(np.zeros(theta_prev.get_value().shape, dtype=theano.config.floatX))
@@ -91,20 +91,129 @@ def dropout_apply(h, mask, p_drop):
     return h
 
 
+class RNN_deep5_bi(object):
+
+    def __init__(self, x_dim, hidden_dim, y_dim, w_spread, p_drop):
+
+        # parameters of the model
+        self.wfx = theano.shared(name="wfx", value=w_spread * np.random.uniform(-1., 1., (x_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.wbx = theano.shared(name="wbx", value=w_spread * np.random.uniform(-1., 1., (x_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+
+        self.wf1 = theano.shared(name="wf1", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.wb1 = theano.shared(name="wb1", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+
+        self.wf2 = theano.shared(name="wf2", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.wb2 = theano.shared(name="wb2", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+
+        self.wf3 = theano.shared(name="wf3", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.wb3 = theano.shared(name="wb3", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+
+        self.wy = theano.shared(name="wy", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + 1, y_dim)).astype(theano.config.floatX), borrow=True)
+
+        h_zeros = theano.shared(name="hfx_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
+
+        # bundle
+        self.params = [self.wfx, self.wbx, self.wf1, self.wb1, self.wf2, self.wb2, self.wf3, self.wb3, self.wy]
+
+        # define recurrent neural network
+        # (for each input word predict all output tags)
+        x = T.fmatrix("x")
+        y = T.fmatrix("y")
+        learn_rate = T.fscalar('learn_rate')
+
+        activation = T.tanh
+        #activation = T.nnet.sigmoid
+        #activation = lambda x: x * (x > 0)  # reLU
+        #activation = lambda x: x * ((x > 0) + 0.01)
+        #activation = lambda x: T.minimum(x * (x > 0), 6)  # capped reLU
+
+        def model(x, wfx, hfx_0, wbx, hbx_0, wf1, hf1_0, wb1, hb1_0, wf2, hf2_0, wb2, hb2_0, wf3, hf3_0, wb3, hb3_0, wy, p_drop):
+
+            def recurrence_x(x_cur, h_prev, w, mask):
+                h = activation(T.dot(T.concatenate([x_cur, h_prev, [one]]), w))
+                h_ = dropout_apply(h, mask, p_drop)
+                return h_
+
+            def recurrence_h(f_cur, b_cur, h_prev, w, mask):
+                h = activation(T.dot(T.concatenate([f_cur, b_cur, h_prev, [one]]), w))
+                h_ = dropout_apply(h, mask, p_drop)
+                return h_
+
+            def recurrence_y(f_cur, b_cur, w):
+                y = activation(T.dot(T.concatenate([f_cur, b_cur, [one]]), w))
+                return y
+
+            one = np.float32(1.)
+            if p_drop > 0.:
+                masks = dropout_masks(theano.shared(np.float32(p_drop)), [hfx_0.shape, hbx_0.shape, hf1_0.shape, hb1_0.shape, hf2_0.shape, hb2_0.shape, hf3_0.shape, hb3_0.shape])
+            else:
+                masks = [[]] * 8
+
+            hfx, _ = theano.scan(fn=recurrence_x, sequences=x, non_sequences=[wfx, masks[0]], outputs_info=[hfx_0], n_steps=x.shape[0])
+            hbx_rev, _ = theano.scan(fn=recurrence_x, sequences=x, non_sequences=[wbx, masks[1]], outputs_info=[hbx_0], n_steps=x.shape[0], go_backwards=True)
+            hbx, _ = theano.scan(fn=lambda a: a, sequences=hbx_rev, n_steps=x.shape[0], go_backwards=True)
+
+            hf1, _ = theano.scan(fn=recurrence_h, sequences=[hfx, hbx], non_sequences=[wf1, masks[2]], outputs_info=[hf1_0], n_steps=x.shape[0])
+            hb1_rev, _ = theano.scan(fn=recurrence_h, sequences=[hfx, hbx], non_sequences=[wb1, masks[3]], outputs_info=[hb1_0], n_steps=x.shape[0], go_backwards=True)
+            hb1, _ = theano.scan(fn=lambda a: a, sequences=hb1_rev, n_steps=x.shape[0], go_backwards=True)
+
+            hf2, _ = theano.scan(fn=recurrence_h, sequences=[hf1, hb1], non_sequences=[wf2, masks[4]], outputs_info=[hf2_0], n_steps=x.shape[0])
+            hb2_rev, _ = theano.scan(fn=recurrence_h, sequences=[hf1, hb1], non_sequences=[wb2, masks[5]], outputs_info=[hb2_0], n_steps=x.shape[0], go_backwards=True)
+            hb2, _ = theano.scan(fn=lambda a: a, sequences=hb2_rev, n_steps=x.shape[0], go_backwards=True)
+
+            hf3, _ = theano.scan(fn=recurrence_h, sequences=[hf2, hb2], non_sequences=[wf3, masks[6]], outputs_info=[hf3_0], n_steps=x.shape[0])
+            hb3_rev, _ = theano.scan(fn=recurrence_h, sequences=[hf2, hb2], non_sequences=[wb3, masks[7]], outputs_info=[hb3_0], n_steps=x.shape[0], go_backwards=True)
+            hb3, _ = theano.scan(fn=lambda a: a, sequences=hb3_rev, n_steps=x.shape[0], go_backwards=True)
+
+            y, _ = theano.scan(fn=recurrence_y, sequences=[hf3, hb3], non_sequences=[wy], outputs_info=[None], n_steps=x.shape[0])
+            return y
+
+        y_pred = model(x, self.wfx, h_zeros, self.wbx, h_zeros, self.wf1, h_zeros, self.wb1, h_zeros, self.wf2, h_zeros, self.wb2, h_zeros, self.wf3, h_zeros, self.wb3, h_zeros, self.wy, 0.)
+        y_noise = model(x, self.wfx, h_zeros, self.wbx, h_zeros, self.wf1, h_zeros, self.wb1, h_zeros, self.wf2, h_zeros, self.wb2, h_zeros, self.wf3, h_zeros, self.wb3, h_zeros, self.wy, p_drop)
+
+        #loss = lambda y_pred, y: T.mean((y_pred - y) ** 2)  # MSE
+        #loss = lambda y_pred, y: T.sum((y_pred - y) ** 16) ** (1./16)
+        #loss = lambda y_pred, y: T.max((y_pred - y) ** 2)
+        loss = lambda y_pred, y: T.max(abs(y - y_pred)) + T.mean((y - y_pred) ** 2)
+        #loss = lambda y_pred, y: T.sum((y_pred - y) ** 16) ** (1./16) + T.mean((y - y_pred) ** 2)
+        l1_reg = 0.001
+        l1 = sum([ T.mean(w)  for w in self.params ])
+        l2_reg = 0.001
+        l2 = sum([ T.mean(w ** 2)  for w in self.params ])
+
+        # define gradients and updates
+        cost = loss(y_noise, y) + l1_reg * l1 + l2_reg * l2
+        #updates = sgd(cost, self.params, learn_rate)
+        #updates = rmsprop(cost, self.params, learn_rate)
+        updates = adam(cost, self.params, learn_rate)
+
+        # compile theano functions
+        self.predict = theano.function(inputs=[x], outputs=y_pred)
+        self.train = theano.function(inputs=[x, y, learn_rate], outputs=[cost, T.min(y_noise), T.max(y_noise), T.mean(y_noise)], updates=updates)
+
+    def save(self, dir, extra=""):
+        for param in self.params:
+            joblib.dump(param.get_value(), "{}/{}{}".format(dir, extra, param.name), compress=0)
+
+    def load(self, dir, extra=""):
+        for param in self.params:
+            param.set_value(joblib.load("{}/{}{}".format(dir, extra, param.name)), borrow=True)
+
+
 class RNN_deep3_bi(object):
 
     def __init__(self, x_dim, hidden_dim, y_dim, w_spread, p_drop):
 
         # parameters of the model
-        self.wfx = theano.shared(name="wfx", value=w_spread * np.random.uniform(-1.0, 1.0, (x_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
-        self.wbx = theano.shared(name="wbx", value=w_spread * np.random.uniform(-1.0, 1.0, (x_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.wfx = theano.shared(name="wfx", value=w_spread * np.random.uniform(-1., 1., (x_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.wbx = theano.shared(name="wbx", value=w_spread * np.random.uniform(-1., 1., (x_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
 
-        self.wf1 = theano.shared(name="wf1", value=w_spread * np.random.uniform(-1.0, 1.0, (2 * hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
-        self.wb1 = theano.shared(name="wb1", value=w_spread * np.random.uniform(-1.0, 1.0, (2 * hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.wf1 = theano.shared(name="wf1", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.wb1 = theano.shared(name="wb1", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
 
-        self.wy = theano.shared(name="wy", value=w_spread * np.random.uniform(-1.0, 1.0, (2 * hidden_dim + 1, y_dim)).astype(theano.config.floatX), borrow=True)
+        self.wy = theano.shared(name="wy", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + 1, y_dim)).astype(theano.config.floatX), borrow=True)
 
-        zeros_h = theano.shared(name="hfx_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
+        h_zeros = theano.shared(name="hfx_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
 
         # bundle
         self.params = [self.wfx, self.wbx, self.wf1, self.wb1, self.wy]
@@ -154,14 +263,14 @@ class RNN_deep3_bi(object):
             y, _ = theano.scan(fn=recurrence_y, sequences=[hf1, hb1], non_sequences=[wy], outputs_info=[None], n_steps=x.shape[0])
             return y
 
-        y_pred = model(x, self.wfx, zeros_h, self.wbx, zeros_h, self.wf1, zeros_h, self.wb1, zeros_h, self.wy, 0.)
-        y_noise = model(x, self.wfx, zeros_h, self.wbx, zeros_h, self.wf1, zeros_h, self.wb1, zeros_h, self.wy, p_drop)
+        y_pred = model(x, self.wfx, h_zeros, self.wbx, h_zeros, self.wf1, h_zeros, self.wb1, h_zeros, self.wy, 0.)
+        y_noise = model(x, self.wfx, h_zeros, self.wbx, h_zeros, self.wf1, h_zeros, self.wb1, h_zeros, self.wy, p_drop)
 
         #loss = lambda y_pred, y: T.mean((y_pred - y) ** 2)  # MSE
-        #loss = lambda y_pred, y: T.sum((y_pred - y) ** 16) ** (1.0/16)
+        #loss = lambda y_pred, y: T.sum((y_pred - y) ** 16) ** (1./16)
         #loss = lambda y_pred, y: T.max((y_pred - y) ** 2)
         loss = lambda y_pred, y: T.max(abs(y - y_pred)) + T.mean((y - y_pred) ** 2)
-        #loss = lambda y_pred, y: T.sum((y_pred - y) ** 16) ** (1.0/16) + T.mean((y - y_pred) ** 2)
+        #loss = lambda y_pred, y: T.sum((y_pred - y) ** 16) ** (1./16) + T.mean((y - y_pred) ** 2)
         l1_reg = 0.001
         l1 = sum([ T.mean(w)  for w in [self.wfx, self.wbx, self.wf1, self.wb1, self.wy] ])
         l2_reg = 0.001
@@ -177,13 +286,13 @@ class RNN_deep3_bi(object):
         self.predict = theano.function(inputs=[x], outputs=y_pred)
         self.train = theano.function(inputs=[x, y, learn_rate], outputs=[cost, T.min(y_noise), T.max(y_noise), T.mean(y_noise)], updates=updates)
 
-    def save(self, dir):
+    def save(self, dir, extra=""):
         for param in self.params:
-            joblib.dump(param.get_value(), "{}/{}.dump".format(dir, param.name), compress=0)
+            joblib.dump(param.get_value(), "{}/{}{}".format(dir, extra, param.name), compress=0)
 
-    def load(self, dir):
+    def load(self, dir, extra=""):
         for param in self.params:
-            param.set_value(joblib.load("{}/{}.dump".format(dir, param.name)), borrow=True)
+            param.set_value(joblib.load("{}/{}{}".format(dir, extra, param.name)), borrow=True)
 
 
 class RNN_deep3_fwd(object):
@@ -191,13 +300,13 @@ class RNN_deep3_fwd(object):
     def __init__(self, x_dim, hidden_dim, y_dim, w_spread, p_drop):
 
         # parameters of the model
-        self.wx = theano.shared(name="wx", value=w_spread * np.random.uniform(-1.0, 1.0, (x_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.wx = theano.shared(name="wx", value=w_spread * np.random.uniform(-1., 1., (x_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
         self.hx_0 = theano.shared(name="hx_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
 
-        self.w1 = theano.shared(name="w1", value=w_spread * np.random.uniform(-1.0, 1.0, (hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.w1 = theano.shared(name="w1", value=w_spread * np.random.uniform(-1., 1., (hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
         self.h1_0 = theano.shared(name="h1_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
 
-        self.wy = theano.shared(name="wy", value=w_spread * np.random.uniform(-1.0, 1.0, (hidden_dim + 1, y_dim)).astype(theano.config.floatX), borrow=True)
+        self.wy = theano.shared(name="wy", value=w_spread * np.random.uniform(-1., 1., (hidden_dim + 1, y_dim)).astype(theano.config.floatX), borrow=True)
 
         # bundle
         #self.params = [self.wx, self.hx_0, self.w1, self.h1_0, self.wy]
@@ -237,10 +346,10 @@ class RNN_deep3_fwd(object):
         y_noise = model(x, self.wx, self.hx_0, self.w1, self.h1_0, self.wy, p_drop)
 
         #loss = lambda y_pred, y: T.mean((y_pred - y) ** 2)  # MSE
-        #loss = lambda y_pred, y: T.sum((y_pred - y) ** 16) ** (1.0/16)
+        #loss = lambda y_pred, y: T.sum((y_pred - y) ** 16) ** (1./16)
         #loss = lambda y_pred, y: T.max((y_pred - y) ** 2)
         loss = lambda y_pred, y: T.max(abs(y - y_pred)) + T.mean((y - y_pred) ** 2)
-        #loss = lambda y_pred, y: T.sum((y_pred - y) ** 16) ** (1.0/16) + T.mean((y - y_pred) ** 2)
+        #loss = lambda y_pred, y: T.sum((y_pred - y) ** 16) ** (1./16) + T.mean((y - y_pred) ** 2)
         l1_reg = 0.001
         l1 = T.mean(self.wx) + T.mean(self.w1) + T.mean(self.wy)
         l2_reg = 0.001
@@ -256,13 +365,13 @@ class RNN_deep3_fwd(object):
         self.predict = theano.function(inputs=[x], outputs=y_pred)
         self.train = theano.function(inputs=[x, y, learn_rate], outputs=[cost, T.min(y_noise), T.max(y_noise), T.mean(y_noise)], updates=updates)
 
-    def save(self, dir):
+    def save(self, dir, extra=""):
         for param in self.params:
-            joblib.dump(param.get_value(), "{}/{}.dump".format(dir, param.name), compress=0)
+            joblib.dump(param.get_value(), "{}/{}{}".format(dir, extra, param.name), compress=0)
 
-    def load(self, dir):
+    def load(self, dir, extra=""):
         for param in self.params:
-            param.set_value(joblib.load("{}/{}.dump".format(dir, param.name)), borrow=True)
+            param.set_value(joblib.load("{}/{}{}".format(dir, extra, param.name)), borrow=True)
 
 
 def relation_to_tag(relation, rpart):
@@ -428,7 +537,7 @@ def load(pdtb_dir, word2vec_bin, word2vec_dim, tag_to_j):
                 doc_x.append(np.zeros(word2vec_dim))
 
             # map tags to vector
-            tags = [0.0] * len(tag_to_j)
+            tags = [0.] * len(tag_to_j)
             for tag, count in word['Tags'].iteritems():
                 tags[tag_to_j[tag]] = float(count)
             doc_y.append(tags)
@@ -524,11 +633,11 @@ if __name__ == '__main__':
     word2vec_dim = 300
 
     tag_to_j = {}
-    #tag_to_j["Explicit:Expansion.Conjunction:1:Arg1"] = len(tag_to_j)
-    #tag_to_j["Explicit:Expansion.Conjunction:1:Arg2"] = len(tag_to_j)
-    #tag_to_j["Explicit:Expansion.Conjunction:1:Connective"] = len(tag_to_j)
-    for i, tag in enumerate(data_pdtb.tags_rnum1_most5):
-        tag_to_j[tag] = i
+    tag_to_j["Explicit:Expansion.Conjunction:1:Arg1"] = len(tag_to_j)
+    tag_to_j["Explicit:Expansion.Conjunction:1:Arg2"] = len(tag_to_j)
+    tag_to_j["Explicit:Expansion.Conjunction:1:Connective"] = len(tag_to_j)
+    #for i, tag in enumerate(data_pdtb.tags_rnum1_most5):
+    #    tag_to_j[tag] = i
 
     x_train, y_train, train_doc_ids, train_words, train_relations = load(args.train_dir, word2vec_bin, word2vec_dim, tag_to_j)
     x_valid, y_valid, valid_doc_ids, valid_words, valid_relations = load(args.valid_dir, word2vec_bin, word2vec_dim, tag_to_j)
@@ -551,12 +660,12 @@ if __name__ == '__main__':
     log.info("instantiate model")
     rand_seed = int(time.time())
     learn_rate = 0.01  # dataset trial=0.01, dev=0.001, train=0.0001?
-    decay_after = 10
-    decay_rate = 0.8
+    decay_after = 5
+    decay_rate = 0.9
     decay_min = learn_rate * 1e-6
     epochs = 2000
     x_dim = word2vec_dim
-    hidden_dim = 100  #XXX: x_dim
+    hidden_dim = 5  #XXX: x_dim
     y_dim = len(tag_to_j)
     w_spread = 0.1  # dim 30=0.1, 300=0.05
     p_drop = 0.1
@@ -565,7 +674,8 @@ if __name__ == '__main__':
     # instantiate the model
     np.random.seed(rand_seed)
     #rnn = RNN_deep3_fwd(x_dim=x_dim, hidden_dim=hidden_dim, y_dim=y_dim, w_spread=w_spread, p_drop=p_drop)
-    rnn = RNN_deep3_bi(x_dim=x_dim, hidden_dim=hidden_dim, y_dim=y_dim, w_spread=w_spread, p_drop=p_drop)
+    #rnn = RNN_deep3_bi(x_dim=x_dim, hidden_dim=hidden_dim, y_dim=y_dim, w_spread=w_spread, p_drop=p_drop)
+    rnn = RNN_deep5_bi(x_dim=x_dim, hidden_dim=hidden_dim, y_dim=y_dim, w_spread=w_spread, p_drop=p_drop)
     #rnn.load(args.model_dir)
 
     # iterate through train dataset
@@ -576,14 +686,14 @@ if __name__ == '__main__':
     best_epoch = 0
     #best_rnn = rnn
     epoch = 0
-    while epoch < epochs or learn_rate > decay_min:
+    while epoch < epochs and learn_rate > decay_min:
 
         # train model
         t = time.time()
-        cost_avg = 0.0
+        cost_avg = 0.
         cost_min = np.inf
         cost_max = -np.inf
-        y_min_avg = y_max_avg = y_mean_avg = 0.0
+        y_min_avg = y_max_avg = y_mean_avg = 0.
         for i, (x, y) in enumerate(zip(x_train, y_train)):
             cost, y_min, y_max, y_mean = rnn.train(x, y, np.float32(learn_rate))
             cost_avg += cost
@@ -596,7 +706,7 @@ if __name__ == '__main__':
             y_mean_avg += y_mean
 
             if i % int(len(x_train) / 4 + 1) == 0 and time.time() - t > 10:
-                log.debug("learning epoch {} ({:.2f}%), {}".format(epoch, (i + 1) * 100.0 / len(x_train), args.model_dir))
+                log.debug("learning epoch {} ({:.2f}%), {}".format(epoch, (i + 1) * 100. / len(x_train), args.model_dir))
         cost_avg /= len(x_train)
         y_min_avg /= len(x_train)
         y_max_avg /= len(x_train)
@@ -606,10 +716,10 @@ if __name__ == '__main__':
         if cost_avg < decay_cost:
             decay_cost = cost_avg
             decay_epoch = epoch
+            rnn.save(args.model_dir, "decay_")
 
         # validate model
         if epoch % valid_freq == 0:
-            t = time.time()
             y_relations = []
             for i, (x, y, words) in enumerate(zip(x_valid, y_valid, valid_words_list)):
                 y_pred = rnn.predict(x)
@@ -619,13 +729,13 @@ if __name__ == '__main__':
 
             # evaluate all relations
             precision, recall, f1 = scorer.evaluate_relation(valid_relations_list, y_relations)
-            log.info("valid set ({:.2f} sec): precision {:.2f}, recall {:.2f}, f1 {:.2f}{} (best {})".format(time.time() - t, precision, recall, f1, (" +" if f1 > best_f1 else "  "), best_f1))
+            log.info("valid set precision {:.2f}, recall {:.2f}, f1 {:.2f}{} (best {})".format(precision, recall, f1, (" +" if f1 > best_f1 else "  "), best_f1))
             if f1 > best_f1:  # save best model
                 best_f1 = f1
                 best_epoch = epoch
                 #best_rnn = copy.deepcopy(rnn)
-                rnn.save(args.model_dir)
-            if f1 >= 1.0:  # perfect
+                rnn.save(args.model_dir, "f1_")
+            if f1 >= 1.:  # perfect
                 print "  WOOHOO!!!"
                 break
 
