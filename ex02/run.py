@@ -34,8 +34,64 @@ if socket.gethostname() == "elite":
     theano.config.exception_verbosity = 'high'
 
 
-# similar to https://github.com/lisa-lab/DeepLearningTutorials/blob/master/code/rnnslu.py
-class RNN_deep(object):
+### RNN
+
+def sgd(cost, params, learn_rate):
+    gradients = T.grad(cost, wrt=params)
+    updates = [ (p, p - learn_rate * g)  for p, g in zip(params, gradients) ]
+    return updates
+
+def rmsprop(cost, params, learn_rate=0.01, rho=0.9, epsilon=1e-6):
+    grads = T.grad(cost=cost, wrt=params)
+    updates = []
+    for p, g in zip(params, grads):
+        acc = theano.shared(p.get_value() * 0.)
+        acc_new = rho * acc + (1 - rho) * g ** 2
+        gradient_scaling = T.sqrt(acc_new + epsilon)
+        g = g / gradient_scaling
+        updates.append((acc, acc_new))
+        updates.append((p, p - learn_rate * g))
+    return updates
+
+def adam(loss, all_params, learn_rate=0.001, b1=0.9, b2=0.999, e=1e-8, gamma=1-1e-8):
+    """ADAM update rules
+    
+    Kingma, Diederik, and Jimmy Ba. "Adam: A Method for Stochastic Optimization." arXiv preprint arXiv:1412.6980 (2014). http://arxiv.org/pdf/1412.6980v4.pdf
+    """
+    updates = []
+    all_grads = theano.grad(loss, all_params)
+    alpha = learn_rate
+    t = theano.shared(np.float32(1.0))
+    b1_t = b1 * gamma ** (t - 1.0)   # decay the first moment running average coefficient
+ 
+    for theta_prev, g in zip(all_params, all_grads):
+        m_prev = theano.shared(np.zeros(theta_prev.get_value().shape, dtype=theano.config.floatX))
+        v_prev = theano.shared(np.zeros(theta_prev.get_value().shape, dtype=theano.config.floatX))
+
+        m = b1_t * m_prev + (1. - b1_t) * g  # update biased first moment estimate
+        v = b2 * v_prev + (1. - b2) * g ** 2  # update biased second raw moment estimate
+        m_hat = m / (1. - b1 ** t)  # compute bias-corrected first moment estimate
+        v_hat = v / (1. - b2 ** t)  # compute bias-corrected second raw moment estimate
+        theta = theta_prev - (alpha * m_hat) / (T.sqrt(v_hat) + e)  # update parameters
+
+        updates.append((m_prev, m))
+        updates.append((v_prev, v))
+        updates.append((theta_prev, theta) )
+    updates.append((t, t + 1.))
+    return updates
+
+def dropout_masks(p_drop, shapes):
+    srng = T.shared_randomstreams.RandomStreams(np.random.randint(999999))
+    masks = [ srng.binomial(n=1, p=np.float32(1.) - p_drop, size=shape, dtype=theano.config.floatX)  for shape in shapes ]
+    return masks
+
+def dropout_apply(h, mask, p_drop):
+    if p_drop > 0.:
+        h = h * mask / np.float32(1. - p_drop)
+    return h
+
+
+class RNN_deep3_fwd(object):
 
     def __init__(self, x_dim, hidden_dim, y_dim, w_spread, p_drop):
 
@@ -49,7 +105,8 @@ class RNN_deep(object):
         self.wy = theano.shared(name="wy", value=w_spread * np.random.uniform(-1.0, 1.0, (hidden_dim + 1, y_dim)).astype(theano.config.floatX), borrow=True)
 
         # bundle
-        self.params = [self.wx, self.hx_0, self.w1, self.h1_0, self.wy]
+        #self.params = [self.wx, self.hx_0, self.w1, self.h1_0, self.wy]
+        self.params = [self.wx, self.w1, self.wy]
 
         # define recurrent neural network
         # (for each input word predict all output tags)
@@ -62,59 +119,6 @@ class RNN_deep(object):
         #activation = lambda x: x * (x > 0)  # reLU
         #activation = lambda x: x * ((x > 0) + 0.01)
         #activation = lambda x: T.minimum(x * (x > 0), 6)  # capped reLU
-
-        #def sgd(cost, params, learn_rate):
-        #    gradients = T.grad(cost, wrt=params)
-        #    updates = [ (p, p - learn_rate * g)  for p, g in zip(params, gradients) ]
-        #    return updates
-
-        #def rmsprop(cost, params, learn_rate=0.01, rho=0.9, epsilon=1e-6):
-        #    grads = T.grad(cost=cost, wrt=params)
-        #    updates = []
-        #    for p, g in zip(params, grads):
-        #        acc = theano.shared(p.get_value() * 0.)
-        #        acc_new = rho * acc + (1 - rho) * g ** 2
-        #        gradient_scaling = T.sqrt(acc_new + epsilon)
-        #        g = g / gradient_scaling
-        #        updates.append((acc, acc_new))
-        #        updates.append((p, p - learn_rate * g))
-        #    return updates
-
-        def adam(loss, all_params, learn_rate=0.001, b1=0.9, b2=0.999, e=1e-8, gamma=1-1e-8):
-            """ADAM update rules
-            
-            Kingma, Diederik, and Jimmy Ba. "Adam: A Method for Stochastic Optimization." arXiv preprint arXiv:1412.6980 (2014). http://arxiv.org/pdf/1412.6980v4.pdf
-            """
-            updates = []
-            all_grads = theano.grad(loss, all_params)
-            alpha = learn_rate
-            t = theano.shared(np.float32(1.0))
-            b1_t = b1 * gamma ** (t - 1.0)   # decay the first moment running average coefficient
-         
-            for theta_prev, g in zip(all_params, all_grads):
-                m_prev = theano.shared(np.zeros(theta_prev.get_value().shape, dtype=theano.config.floatX))
-                v_prev = theano.shared(np.zeros(theta_prev.get_value().shape, dtype=theano.config.floatX))
-
-                m = b1_t * m_prev + (1. - b1_t) * g  # update biased first moment estimate
-                v = b2 * v_prev + (1. - b2) * g ** 2  # update biased second raw moment estimate
-                m_hat = m / (1. - b1 ** t)  # compute bias-corrected first moment estimate
-                v_hat = v / (1. - b2 ** t)  # compute bias-corrected second raw moment estimate
-                theta = theta_prev - (alpha * m_hat) / (T.sqrt(v_hat) + e)  # update parameters
-
-                updates.append((m_prev, m))
-                updates.append((v_prev, v))
-                updates.append((theta_prev, theta) )
-            updates.append((t, t + 1.))
-            return updates
-
-        srng = T.shared_randomstreams.RandomStreams(np.random.randint(999999))
-        def dropout_masks(p_drop, shapes):
-            masks = [ srng.binomial(n=1, p=np.float32(1.) - p_drop, size=shape, dtype=theano.config.floatX)  for shape in shapes ]
-            return masks
-        def dropout_apply(h, mask, p_drop):
-            if p_drop > 0.:
-                h = h * mask / np.float32(1. - p_drop)
-            return h
 
         def model(x, wx, hx_0, w1, h1_0, wy, p_drop):
 
@@ -425,11 +429,11 @@ if __name__ == '__main__':
     word2vec_dim = 300
 
     tag_to_j = {}
-    #tag_to_j["Explicit:Expansion.Conjunction:1:Arg1"] = len(tag_to_j)
-    #tag_to_j["Explicit:Expansion.Conjunction:1:Arg2"] = len(tag_to_j)
-    #tag_to_j["Explicit:Expansion.Conjunction:1:Connective"] = len(tag_to_j)
-    for i, tag in enumerate(data_pdtb.tags_rnum1_most5):
-        tag_to_j[tag] = i
+    tag_to_j["Explicit:Expansion.Conjunction:1:Arg1"] = len(tag_to_j)
+    tag_to_j["Explicit:Expansion.Conjunction:1:Arg2"] = len(tag_to_j)
+    tag_to_j["Explicit:Expansion.Conjunction:1:Connective"] = len(tag_to_j)
+    #for i, tag in enumerate(data_pdtb.tags_rnum1_most5):
+    #    tag_to_j[tag] = i
 
     x_train, y_train, train_doc_ids, train_words, train_relations = load(args.train_dir, word2vec_bin, word2vec_dim, tag_to_j)
     x_valid, y_valid, valid_doc_ids, valid_words, valid_relations = load(args.valid_dir, word2vec_bin, word2vec_dim, tag_to_j)
@@ -457,7 +461,7 @@ if __name__ == '__main__':
     decay_min = learn_rate * 1e-6
     epochs = 10000
     x_dim = word2vec_dim
-    hidden_dim = 60  #XXX: x_dim
+    hidden_dim = 30  #XXX: x_dim
     y_dim = len(tag_to_j)
     w_spread = 0.1  # dim 30=0.1, 300=0.05
     p_drop = 0.
@@ -465,7 +469,7 @@ if __name__ == '__main__':
 
     # instantiate the model
     np.random.seed(rand_seed)
-    rnn = RNN_deep(x_dim=x_dim, hidden_dim=hidden_dim, y_dim=y_dim, w_spread=w_spread, p_drop=p_drop)
+    rnn = RNN_deep3_fwd(x_dim=x_dim, hidden_dim=hidden_dim, y_dim=y_dim, w_spread=w_spread, p_drop=p_drop)
     #rnn.load(args.model_dir)
 
     # iterate through train dataset
