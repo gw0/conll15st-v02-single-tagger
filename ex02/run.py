@@ -11,6 +11,7 @@ import argparse
 import os
 import joblib
 import json
+import csv
 import numpy as np
 import theano
 import theano.tensor as T
@@ -26,12 +27,27 @@ import data_word2vec
 from scorer import scorer, validator
 log = common.logging.getLogger(__name__)
 
-# debugging
+### Debugging
+
 theano.config.floatX = 'float32'
 import socket
 if socket.gethostname() == "elite":
     theano.config.optimizer = 'fast_compile'
     theano.config.exception_verbosity = 'high'
+
+def log_results(filename):
+    if activation_f == T.tanh:
+        activation = "tanh"
+    if updates_f == adam:
+        updates = "adam"
+
+    is_new = not os.path.isfile(filename)
+    f = open(filename, 'ab')
+    f_csv = csv.writer(f, delimiter="\t", quotechar='"', quoting=csv.QUOTE_MINIMAL)
+    if is_new:
+        f_csv.writerow(["experiment", "train", "valid", "machine", "epoch", "learn_rate", "precision", "recall", "f1", "cost_min", "cost_max", "cost_avg", "y_min_avg", "y_max_avg", "y_mean_avg", "epoch_time", "model", "x_dim", "hidden_dim", "y_dim", "w_spread", "p_drop", "init_rate", "decay_after", "decay_rate", "activation", "updates", "l1_reg", "l2_reg"])
+    f_csv.writerow([experiment, train, valid, socket.gethostname(), epoch, learn_rate, precision, recall, f1, cost_min, cost_max, cost_avg, y_min_avg, y_max_avg, y_mean_avg, epoch_time, model, x_dim, hidden_dim, y_dim, w_spread, p_drop, init_rate, decay_after, decay_rate, activation, updates, l1_reg, l2_reg])
+    f.close()
 
 
 ### RNN
@@ -82,7 +98,7 @@ def adam(loss, all_params, learn_rate=0.001, b1=0.9, b2=0.999, e=1e-8, gamma=1-1
 
 def dropout_masks(p_drop, shapes):
     srng = T.shared_randomstreams.RandomStreams(np.random.randint(999999))
-    masks = [ srng.binomial(n=1, p=np.float32(1.) - p_drop, size=shape, dtype=theano.config.floatX)  for shape in shapes ]
+    masks = [ srng.binomial(n=1, p=np.float32(1.) - theano.shared(np.float32(p_drop)), size=shape, dtype=theano.config.floatX)  for shape in shapes ]
     return masks
 
 def dropout_apply(h, mask, p_drop):
@@ -91,26 +107,139 @@ def dropout_apply(h, mask, p_drop):
     return h
 
 
+class RNN_deep3_wide2_bi(object):
+
+    def __init__(self, x_dim, hidden_dim, y_dim, w_spread, p_drop, activation_f=T.tanh, updates_f=adam, l1_reg=0.01, l2_reg=0.01):
+
+        # parameters of the model
+        self.wfpx = theano.shared(name="wfpx", value=w_spread * np.random.uniform(-1., 1., (hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.wbpx = theano.shared(name="wbpx", value=w_spread * np.random.uniform(-1., 1., (hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.wfx = theano.shared(name="wfx", value=w_spread * np.random.uniform(-1., 1., (x_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.wbx = theano.shared(name="wbx", value=w_spread * np.random.uniform(-1., 1., (x_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.hfx_0 = theano.shared(name="hfx_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
+        self.hbx_0 = theano.shared(name="hbx_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
+
+        self.wfp1 = theano.shared(name="wfp1", value=w_spread * np.random.uniform(-1., 1., (hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.wbp1 = theano.shared(name="wbp1", value=w_spread * np.random.uniform(-1., 1., (hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.wf1 = theano.shared(name="wf1", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.wb1 = theano.shared(name="wb1", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.hf1_0 = theano.shared(name="hf1_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
+        self.hb1_0 = theano.shared(name="hb1_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
+
+        self.wy = theano.shared(name="wy", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + 1, y_dim)).astype(theano.config.floatX), borrow=True)
+
+        # bundle
+        self.params = [self.wfpx, self.wbpx, self.wfx, self.wbx, self.wfp1, self.wbp1, self.wf1, self.wb1, self.wy]
+
+        # define recurrent neural network
+        # (for each input word predict all output tags)
+        x = T.fmatrix("x")
+        y = T.fmatrix("y")
+        learn_rate = T.fscalar('learn_rate')
+
+        #activation = T.tanh
+        #activation = T.nnet.sigmoid
+        #activation = lambda x: x * (x > 0)  # reLU
+        #activation = lambda x: x * ((x > 0) + 0.01)
+        #activation = lambda x: T.minimum(x * (x > 0), 6)  # capped reLU
+        activation = activation_f
+
+        def model(x, wfpx, wbpx, wfx, hfx_0, wbx, hbx_0, wfp1, wbp1, wf1, hf1_0, wb1, hb1_0, wy, p_drop):
+
+            def recurrence_x(x_cur, h_prev, wp, maskp, w, mask):
+                hp = activation(T.dot(T.concatenate([h_prev, [one]]), wp))
+                hp_ = dropout_apply(hp, maskp, p_drop)
+                h = activation(T.dot(T.concatenate([x_cur, hp_, [one]]), w))
+                h_ = dropout_apply(h, mask, p_drop)
+                return h_
+
+            def recurrence_h(f_cur, b_cur, h_prev, wp, maskp, w, mask):
+                hp = activation(T.dot(T.concatenate([h_prev, [one]]), wp))
+                hp_ = dropout_apply(hp, maskp, p_drop)
+                h = activation(T.dot(T.concatenate([f_cur, b_cur, hp_, [one]]), w))
+                h_ = dropout_apply(h, mask, p_drop)
+                return h_
+
+            def recurrence_y(f_cur, b_cur, w):
+                y = activation(T.dot(T.concatenate([f_cur, b_cur, [one]]), w))
+                return y
+
+            one = np.float32(1.)
+            if p_drop > 0.:
+                masks = dropout_masks(p_drop, [hfx_0.shape, hfx_0.shape, hbx_0.shape, hbx_0.shape, hf1_0.shape, hf1_0.shape, hb1_0.shape, hb1_0.shape])
+            else:
+                masks = [[]] * 8
+
+            hfx, _ = theano.scan(fn=recurrence_x, sequences=x, non_sequences=[wfpx, masks[0], wfx, masks[1]], outputs_info=[hfx_0], n_steps=x.shape[0])
+            hbx_rev, _ = theano.scan(fn=recurrence_x, sequences=x, non_sequences=[wbpx, masks[2], wbx, masks[3]], outputs_info=[hbx_0], n_steps=x.shape[0], go_backwards=True)
+            hbx, _ = theano.scan(fn=lambda x: x, sequences=hbx_rev, n_steps=x.shape[0], go_backwards=True)
+
+            hf1, _ = theano.scan(fn=recurrence_h, sequences=[hfx, hbx], non_sequences=[wfp1, masks[4], wf1, masks[5]], outputs_info=[hf1_0], n_steps=x.shape[0])
+            hb1_rev, _ = theano.scan(fn=recurrence_h, sequences=[hfx, hbx], non_sequences=[wbp1, masks[6], wb1, masks[7]], outputs_info=[hb1_0], n_steps=x.shape[0], go_backwards=True)
+            hb1, _ = theano.scan(fn=lambda x: x, sequences=hb1_rev, n_steps=x.shape[0], go_backwards=True)
+
+            y, _ = theano.scan(fn=recurrence_y, sequences=[hf1, hb1], non_sequences=[wy], outputs_info=[None], n_steps=x.shape[0])
+            return y
+
+        y_pred = model(x, self.wfpx, self.wbpx, self.wfx, self.hfx_0, self.wbx, self.hbx_0, self.wfp1, self.wbp1, self.wf1, self.hf1_0, self.wb1, self.hb1_0, self.wy, 0.)
+        y_noise = model(x, self.wfpx, self.wbpx, self.wfx, self.hfx_0, self.wbx, self.hbx_0, self.wfp1, self.wbp1, self.wf1, self.hf1_0, self.wb1, self.hb1_0, self.wy, p_drop)
+
+        #loss = lambda y_pred, y: T.mean((y_pred - y) ** 2)  # MSE
+        #loss = lambda y_pred, y: T.sum((y_pred - y) ** 16) ** (1./16)
+        #loss = lambda y_pred, y: T.max((y_pred - y) ** 2)
+        loss = lambda y_pred, y: T.max(abs(y - y_pred)) + T.mean((y - y_pred) ** 2)
+        #loss = lambda y_pred, y: T.sum((y_pred - y) ** 16) ** (1./16) + T.mean((y - y_pred) ** 2)
+        #l1_reg = 0.001
+        l1 = sum([ T.mean(w)  for w in self.params ])
+        #l2_reg = 0.001
+        l2 = sum([ T.mean(w ** 2)  for w in self.params ])
+
+        # define gradients and updates
+        cost = loss(y_noise, y) + l1_reg * l1 + l2_reg * l2
+        #updates = sgd(cost, self.params, learn_rate)
+        #updates = rmsprop(cost, self.params, learn_rate)
+        #updates = adam(cost, self.params, learn_rate)
+        updates = updates_f(cost, self.params, learn_rate)
+
+        # compile theano functions
+        self.predict = theano.function(inputs=[x], outputs=y_pred)
+        self.train = theano.function(inputs=[x, y, learn_rate], outputs=[cost, T.min(y_noise), T.max(y_noise), T.mean(y_noise)], updates=updates)
+
+    def save(self, dir, extra=""):
+        for param in self.params:
+            joblib.dump(param.get_value(), "{}/{}{}".format(dir, extra, param.name), compress=0)
+
+    def load(self, dir, extra=""):
+        for param in self.params:
+            param.set_value(joblib.load("{}/{}{}".format(dir, extra, param.name)), borrow=True)
+
+
 class RNN_deep5_bi(object):
 
-    def __init__(self, x_dim, hidden_dim, y_dim, w_spread, p_drop):
+    def __init__(self, x_dim, hidden_dim, y_dim, w_spread, p_drop, activation_f=T.tanh, updates_f=adam, l1_reg=0.01, l2_reg=0.01):
 
         # parameters of the model
         self.wfx = theano.shared(name="wfx", value=w_spread * np.random.uniform(-1., 1., (x_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
         self.wbx = theano.shared(name="wbx", value=w_spread * np.random.uniform(-1., 1., (x_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.hfx_0 = theano.shared(name="hfx_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
+        self.hbx_0 = theano.shared(name="hbx_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
 
         self.wf1 = theano.shared(name="wf1", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
         self.wb1 = theano.shared(name="wb1", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.hf1_0 = theano.shared(name="hf1_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
+        self.hb1_0 = theano.shared(name="hb1_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
 
         self.wf2 = theano.shared(name="wf2", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
         self.wb2 = theano.shared(name="wb2", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.hf2_0 = theano.shared(name="hf2_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
+        self.hb2_0 = theano.shared(name="hb2_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
 
         self.wf3 = theano.shared(name="wf3", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
         self.wb3 = theano.shared(name="wb3", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.hf3_0 = theano.shared(name="hf3_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
+        self.hb3_0 = theano.shared(name="hb3_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
 
         self.wy = theano.shared(name="wy", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + 1, y_dim)).astype(theano.config.floatX), borrow=True)
-
-        h_zeros = theano.shared(name="hfx_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
 
         # bundle
         self.params = [self.wfx, self.wbx, self.wf1, self.wb1, self.wf2, self.wb2, self.wf3, self.wb3, self.wy]
@@ -121,11 +250,12 @@ class RNN_deep5_bi(object):
         y = T.fmatrix("y")
         learn_rate = T.fscalar('learn_rate')
 
-        activation = T.tanh
+        #activation = T.tanh
         #activation = T.nnet.sigmoid
         #activation = lambda x: x * (x > 0)  # reLU
         #activation = lambda x: x * ((x > 0) + 0.01)
         #activation = lambda x: T.minimum(x * (x > 0), 6)  # capped reLU
+        activation = activation_f
 
         def model(x, wfx, hfx_0, wbx, hbx_0, wf1, hf1_0, wb1, hb1_0, wf2, hf2_0, wb2, hb2_0, wf3, hf3_0, wb3, hb3_0, wy, p_drop):
 
@@ -145,7 +275,7 @@ class RNN_deep5_bi(object):
 
             one = np.float32(1.)
             if p_drop > 0.:
-                masks = dropout_masks(theano.shared(np.float32(p_drop)), [hfx_0.shape, hbx_0.shape, hf1_0.shape, hb1_0.shape, hf2_0.shape, hb2_0.shape, hf3_0.shape, hb3_0.shape])
+                masks = dropout_masks(p_drop, [hfx_0.shape, hbx_0.shape, hf1_0.shape, hb1_0.shape, hf2_0.shape, hb2_0.shape, hf3_0.shape, hb3_0.shape])
             else:
                 masks = [[]] * 8
 
@@ -168,24 +298,25 @@ class RNN_deep5_bi(object):
             y, _ = theano.scan(fn=recurrence_y, sequences=[hf3, hb3], non_sequences=[wy], outputs_info=[None], n_steps=x.shape[0])
             return y
 
-        y_pred = model(x, self.wfx, h_zeros, self.wbx, h_zeros, self.wf1, h_zeros, self.wb1, h_zeros, self.wf2, h_zeros, self.wb2, h_zeros, self.wf3, h_zeros, self.wb3, h_zeros, self.wy, 0.)
-        y_noise = model(x, self.wfx, h_zeros, self.wbx, h_zeros, self.wf1, h_zeros, self.wb1, h_zeros, self.wf2, h_zeros, self.wb2, h_zeros, self.wf3, h_zeros, self.wb3, h_zeros, self.wy, p_drop)
+        y_pred = model(x, self.wfx, self.hfx_0, self.wbx, self.hbx_0, self.wf1, self.hf1_0, self.wb1, self.hb1_0, self.wf2, self.hf2_0, self.wb2, self.hb2_0, self.wf3, self.hf3_0, self.wb3, self.hb3_0, self.wy, 0.)
+        y_noise = model(x, self.wfx, self.hfx_0, self.wbx, self.hbx_0, self.wf1, self.hf1_0, self.wb1, self.hb1_0, self.wf2, self.hf2_0, self.wb2, self.hb2_0, self.wf3, self.hf3_0, self.wb3, self.hb3_0, self.wy, p_drop)
 
         #loss = lambda y_pred, y: T.mean((y_pred - y) ** 2)  # MSE
         #loss = lambda y_pred, y: T.sum((y_pred - y) ** 16) ** (1./16)
         #loss = lambda y_pred, y: T.max((y_pred - y) ** 2)
         loss = lambda y_pred, y: T.max(abs(y - y_pred)) + T.mean((y - y_pred) ** 2)
         #loss = lambda y_pred, y: T.sum((y_pred - y) ** 16) ** (1./16) + T.mean((y - y_pred) ** 2)
-        l1_reg = 0.001
+        #l1_reg = 0.01
         l1 = sum([ T.mean(w)  for w in self.params ])
-        l2_reg = 0.001
+        #l2_reg = 0.01
         l2 = sum([ T.mean(w ** 2)  for w in self.params ])
 
         # define gradients and updates
         cost = loss(y_noise, y) + l1_reg * l1 + l2_reg * l2
         #updates = sgd(cost, self.params, learn_rate)
         #updates = rmsprop(cost, self.params, learn_rate)
-        updates = adam(cost, self.params, learn_rate)
+        #updates = adam(cost, self.params, learn_rate)
+        updates = updates_f(cost, self.params, learn_rate)
 
         # compile theano functions
         self.predict = theano.function(inputs=[x], outputs=y_pred)
@@ -202,18 +333,21 @@ class RNN_deep5_bi(object):
 
 class RNN_deep3_bi(object):
 
-    def __init__(self, x_dim, hidden_dim, y_dim, w_spread, p_drop):
+    def __init__(self, x_dim, hidden_dim, y_dim, w_spread, p_drop, activation_f=T.tanh, updates_f=adam, l1_reg=0.01, l2_reg=0.01):
 
         # parameters of the model
         self.wfx = theano.shared(name="wfx", value=w_spread * np.random.uniform(-1., 1., (x_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
         self.wbx = theano.shared(name="wbx", value=w_spread * np.random.uniform(-1., 1., (x_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.hfx_0 = theano.shared(name="hfx_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
+        self.hbx_0 = theano.shared(name="hbx_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
 
         self.wf1 = theano.shared(name="wf1", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
         self.wb1 = theano.shared(name="wb1", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
+        self.hf1_0 = theano.shared(name="hf1_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
+        self.hb1_0 = theano.shared(name="hb1_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
 
         self.wy = theano.shared(name="wy", value=w_spread * np.random.uniform(-1., 1., (2 * hidden_dim + 1, y_dim)).astype(theano.config.floatX), borrow=True)
 
-        h_zeros = theano.shared(name="hfx_0", value=np.zeros(hidden_dim, dtype=theano.config.floatX), borrow=True)
 
         # bundle
         self.params = [self.wfx, self.wbx, self.wf1, self.wb1, self.wy]
@@ -224,11 +358,12 @@ class RNN_deep3_bi(object):
         y = T.fmatrix("y")
         learn_rate = T.fscalar('learn_rate')
 
-        activation = T.tanh
+        #activation = T.tanh
         #activation = T.nnet.sigmoid
         #activation = lambda x: x * (x > 0)  # reLU
         #activation = lambda x: x * ((x > 0) + 0.01)
         #activation = lambda x: T.minimum(x * (x > 0), 6)  # capped reLU
+        activation = activation_f
 
         def model(x, wfx, hfx_0, wbx, hbx_0, wf1, hf1_0, wb1, hb1_0, wy, p_drop):
 
@@ -248,7 +383,7 @@ class RNN_deep3_bi(object):
 
             one = np.float32(1.)
             if p_drop > 0.:
-                masks = dropout_masks(theano.shared(np.float32(p_drop)), [hfx_0.shape, hbx_0.shape, hf1_0.shape, hb1_0.shape])
+                masks = dropout_masks(p_drop, [hfx_0.shape, hbx_0.shape, hf1_0.shape, hb1_0.shape])
             else:
                 masks = [[]] * 4
 
@@ -263,24 +398,25 @@ class RNN_deep3_bi(object):
             y, _ = theano.scan(fn=recurrence_y, sequences=[hf1, hb1], non_sequences=[wy], outputs_info=[None], n_steps=x.shape[0])
             return y
 
-        y_pred = model(x, self.wfx, h_zeros, self.wbx, h_zeros, self.wf1, h_zeros, self.wb1, h_zeros, self.wy, 0.)
-        y_noise = model(x, self.wfx, h_zeros, self.wbx, h_zeros, self.wf1, h_zeros, self.wb1, h_zeros, self.wy, p_drop)
+        y_pred = model(x, self.wfx, self.hfx_0, self.wbx, self.hbx_0, self.wf1, self.hf1_0, self.wb1, self.hb1_0, self.wy, 0.)
+        y_noise = model(x, self.wfx, self.hfx_0, self.wbx, self.hbx_0, self.wf1, self.hf1_0, self.wb1, self.hb1_0, self.wy, p_drop)
 
         #loss = lambda y_pred, y: T.mean((y_pred - y) ** 2)  # MSE
         #loss = lambda y_pred, y: T.sum((y_pred - y) ** 16) ** (1./16)
         #loss = lambda y_pred, y: T.max((y_pred - y) ** 2)
         loss = lambda y_pred, y: T.max(abs(y - y_pred)) + T.mean((y - y_pred) ** 2)
         #loss = lambda y_pred, y: T.sum((y_pred - y) ** 16) ** (1./16) + T.mean((y - y_pred) ** 2)
-        l1_reg = 0.001
-        l1 = sum([ T.mean(w)  for w in [self.wfx, self.wbx, self.wf1, self.wb1, self.wy] ])
-        l2_reg = 0.001
-        l2 = sum([ T.mean(w ** 2)  for w in [self.wfx, self.wbx, self.wf1, self.wb1, self.wy] ])
+        #l1_reg = 0.001
+        l1 = sum([ T.mean(w)  for w in self.params ])
+        #l2_reg = 0.001
+        l2 = sum([ T.mean(w ** 2)  for w in self.params ])
 
         # define gradients and updates
         cost = loss(y_noise, y) + l1_reg * l1 + l2_reg * l2
         #updates = sgd(cost, self.params, learn_rate)
         #updates = rmsprop(cost, self.params, learn_rate)
-        updates = adam(cost, self.params, learn_rate)
+        #updates = adam(cost, self.params, learn_rate)
+        updates = updates_f(cost, self.params, learn_rate)
 
         # compile theano functions
         self.predict = theano.function(inputs=[x], outputs=y_pred)
@@ -297,7 +433,7 @@ class RNN_deep3_bi(object):
 
 class RNN_deep3_fwd(object):
 
-    def __init__(self, x_dim, hidden_dim, y_dim, w_spread, p_drop):
+    def __init__(self, x_dim, hidden_dim, y_dim, w_spread, p_drop, activation_f=T.tanh, updates_f=adam, l1_reg=0.01, l2_reg=0.01):
 
         # parameters of the model
         self.wx = theano.shared(name="wx", value=w_spread * np.random.uniform(-1., 1., (x_dim + hidden_dim + 1, hidden_dim)).astype(theano.config.floatX), borrow=True)
@@ -318,11 +454,12 @@ class RNN_deep3_fwd(object):
         y = T.fmatrix("y")
         learn_rate = T.fscalar('learn_rate')
 
-        activation = T.tanh
+        #activation = T.tanh
         #activation = T.nnet.sigmoid
         #activation = lambda x: x * (x > 0)  # reLU
         #activation = lambda x: x * ((x > 0) + 0.01)
         #activation = lambda x: T.minimum(x * (x > 0), 6)  # capped reLU
+        activation = activation_f
 
         def model(x, wx, hx_0, w1, h1_0, wy, p_drop):
 
@@ -336,7 +473,7 @@ class RNN_deep3_fwd(object):
                 return (hx, h1, y_pred)
 
             if p_drop > 0.:
-                masks = dropout_masks(theano.shared(np.float32(p_drop)), [hx_0.shape, h1_0.shape])
+                masks = dropout_masks(p_drop, [hx_0.shape, h1_0.shape])
             else:
                 masks = []
             (_, _, y_pred), _ = theano.scan(fn=recurrence, sequences=x, non_sequences=[masks], outputs_info=[hx_0, h1_0, None], n_steps=x.shape[0])
@@ -350,16 +487,17 @@ class RNN_deep3_fwd(object):
         #loss = lambda y_pred, y: T.max((y_pred - y) ** 2)
         loss = lambda y_pred, y: T.max(abs(y - y_pred)) + T.mean((y - y_pred) ** 2)
         #loss = lambda y_pred, y: T.sum((y_pred - y) ** 16) ** (1./16) + T.mean((y - y_pred) ** 2)
-        l1_reg = 0.001
+        #l1_reg = 0.001
         l1 = T.mean(self.wx) + T.mean(self.w1) + T.mean(self.wy)
-        l2_reg = 0.001
+        #l2_reg = 0.001
         l2 = T.mean(self.wx ** 2) + T.mean(self.w1 ** 2) + T.mean(self.wy ** 2)
 
         # define gradients and updates
         cost = loss(y_noise, y) + l1_reg * l1 + l2_reg * l2
         #updates = sgd(cost, self.params, learn_rate)
         #updates = rmsprop(cost, self.params, learn_rate)
-        updates = adam(cost, self.params, learn_rate)
+        #updates = adam(cost, self.params, learn_rate)
+        updates = updates_f(cost, self.params, learn_rate)
 
         # compile theano functions
         self.predict = theano.function(inputs=[x], outputs=y_pred)
@@ -633,11 +771,11 @@ if __name__ == '__main__':
     word2vec_dim = 300
 
     tag_to_j = {}
-    tag_to_j["Explicit:Expansion.Conjunction:1:Arg1"] = len(tag_to_j)
-    tag_to_j["Explicit:Expansion.Conjunction:1:Arg2"] = len(tag_to_j)
-    tag_to_j["Explicit:Expansion.Conjunction:1:Connective"] = len(tag_to_j)
-    #for i, tag in enumerate(data_pdtb.tags_rnum1_most5):
-    #    tag_to_j[tag] = i
+    #tag_to_j["Explicit:Expansion.Conjunction:1:Arg1"] = len(tag_to_j)
+    #tag_to_j["Explicit:Expansion.Conjunction:1:Arg2"] = len(tag_to_j)
+    #tag_to_j["Explicit:Expansion.Conjunction:1:Connective"] = len(tag_to_j)
+    for i, tag in enumerate(data_pdtb.tags_rnum1_most5):
+        tag_to_j[tag] = i
 
     x_train, y_train, train_doc_ids, train_words, train_relations = load(args.train_dir, word2vec_bin, word2vec_dim, tag_to_j)
     x_valid, y_valid, valid_doc_ids, valid_words, valid_relations = load(args.valid_dir, word2vec_bin, word2vec_dim, tag_to_j)
@@ -659,30 +797,43 @@ if __name__ == '__main__':
     # settings
     log.info("instantiate model")
     rand_seed = int(time.time())
-    learn_rate = 0.01  # dataset trial=0.01, dev=0.001, train=0.0001?
-    decay_after = 5
-    decay_rate = 0.9
-    decay_min = learn_rate * 1e-6
-    epochs = 2000
+
+    experiment = "ex02m"
+    train = "dev"
+    valid = "dev"
+    model = "RNN_deep5_bi"
+
     x_dim = word2vec_dim
-    hidden_dim = 5  #XXX: x_dim
+    hidden_dim = 300  #XXX: x_dim
     y_dim = len(tag_to_j)
-    w_spread = 0.1  # dim 30=0.1, 300=0.05
-    p_drop = 0.1
+    w_spread = 0.05  # dim 30=0.1, 300=0.05
+    p_drop = 0.2
+    epochs = 2000
+    init_rate = 0.0001  # dataset trial=0.01, dev=0.001, train=0.0001
+    decay_after = 5
+    decay_rate = 0.8
+    decay_min = init_rate * 1e-6
     valid_freq = 1
+    activation_f = T.tanh
+    updates_f = adam
+    l1_reg = 0.01
+    l2_reg = 0.01
 
     # instantiate the model
     np.random.seed(rand_seed)
-    #rnn = RNN_deep3_fwd(x_dim=x_dim, hidden_dim=hidden_dim, y_dim=y_dim, w_spread=w_spread, p_drop=p_drop)
-    #rnn = RNN_deep3_bi(x_dim=x_dim, hidden_dim=hidden_dim, y_dim=y_dim, w_spread=w_spread, p_drop=p_drop)
-    rnn = RNN_deep5_bi(x_dim=x_dim, hidden_dim=hidden_dim, y_dim=y_dim, w_spread=w_spread, p_drop=p_drop)
-    #rnn.load(args.model_dir)
+    #rnn = RNN_deep3_fwd(x_dim=x_dim, hidden_dim=hidden_dim, y_dim=y_dim, w_spread=w_spread, p_drop=p_drop, activation_f=activation_f, updates_f=updates_f, l1_reg=l1_reg, l2_reg=l2_reg)
+    #rnn = RNN_deep3_bi(x_dim=x_dim, hidden_dim=hidden_dim, y_dim=y_dim, w_spread=w_spread, p_drop=p_drop, activation_f=activation_f, updates_f=updates_f, l1_reg=l1_reg, l2_reg=l2_reg)
+    rnn = RNN_deep5_bi(x_dim=x_dim, hidden_dim=hidden_dim, y_dim=y_dim, w_spread=w_spread, p_drop=p_drop, activation_f=activation_f, updates_f=updates_f, l1_reg=l1_reg, l2_reg=l2_reg)
+    #rnn = RNN_deep3_wide2_bi(x_dim=x_dim, hidden_dim=hidden_dim, y_dim=y_dim, w_spread=w_spread, p_drop=p_drop, activation_f=activation_f, updates_f=updates_f, l1_reg=l1_reg, l2_reg=l2_reg)
+    #rnn.load(args.model_dir, "decay_")
 
     # iterate through train dataset
     log.info("learning and evaluating")
+    learn_rate = init_rate
     decay_cost = np.inf
     decay_epoch = 0
     best_f1 = -np.inf
+    best_cost = np.inf
     best_epoch = 0
     #best_rnn = rnn
     epoch = 0
@@ -706,13 +857,14 @@ if __name__ == '__main__':
             y_mean_avg += y_mean
 
             if i % int(len(x_train) / 4 + 1) == 0 and time.time() - t > 10:
-                log.debug("learning epoch {} ({:.2f}%), {}".format(epoch, (i + 1) * 100. / len(x_train), args.model_dir))
+                log.debug("learning epoch {} ({:.2f}%)".format(epoch, (i + 1) * 100. / len(x_train)))
+        epoch_time = time.time() - t
         cost_avg /= len(x_train)
         y_min_avg /= len(x_train)
         y_max_avg /= len(x_train)
         y_mean_avg /= len(x_train)
-        log.info("learning epoch {} ({:.2f} sec), rate {:.2e}, train cost ({:.4f} {:.4f}) avg {}{}".format(epoch, time.time() - t, learn_rate, float(cost_min), float(cost_max), cost_avg, (" +" if cost_avg < decay_cost else "  ")))
-        log.debug("  {} {} {}".format(y_min_avg, y_max_avg, y_mean_avg))
+        log.info("{} learning epoch {} ({:.2f} sec), rate {:.2e}".format(experiment, epoch, epoch_time, learn_rate))
+        log.debug("  train cost {:7.4f} {:7.4f} {:7.4f} (best {:10.8f}) {}, train y {:7.4f} {:7.4f} {:7.4f}".format(float(cost_min), float(cost_max), float(cost_avg), float(decay_cost), ("++" if cost_avg < decay_cost else "  "), float(y_min_avg), float(y_max_avg), float(y_mean_avg)))
         if cost_avg < decay_cost:
             decay_cost = cost_avg
             decay_epoch = epoch
@@ -729,15 +881,21 @@ if __name__ == '__main__':
 
             # evaluate all relations
             precision, recall, f1 = scorer.evaluate_relation(valid_relations_list, y_relations)
-            log.info("valid set precision {:.2f}, recall {:.2f}, f1 {:.2f}{} (best {})".format(precision, recall, f1, (" +" if f1 > best_f1 else "  "), best_f1))
+            log.info("  valid precision {:7.4f} recall {:7.4f}, f1 {:7.4f} (best {:10.8f}) {}".format(precision, recall, f1, best_f1, ("++" if f1 > best_f1 else "  ")))
             if f1 > best_f1:  # save best model
                 best_f1 = f1
                 best_epoch = epoch
                 #best_rnn = copy.deepcopy(rnn)
                 rnn.save(args.model_dir, "f1_")
+                log_results("{}/results.csv".format(args.model_dir))
+            elif epoch % 50 == 0:
+                log_results("{}/results.csv".format(args.model_dir))
             if f1 >= 1.:  # perfect
                 print "  WOOHOO!!!"
-                break
+                #break
+                if cost_avg < best_cost:
+                    best_cost = cost_avg
+                    rnn.save(args.model_dir, "f1cost_")
 
         # learning rate decay if no improvement after some epochs
         if epoch - decay_epoch >= decay_after:
