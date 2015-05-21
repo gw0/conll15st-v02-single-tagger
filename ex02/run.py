@@ -798,9 +798,9 @@ if __name__ == '__main__':
     log.info("instantiate model")
     rand_seed = int(time.time())
 
-    experiment = "ex02m"
-    train = "dev"
-    valid = "dev"
+    experiment = "ex02n"
+    train = "dev-70"
+    valid = "dev-30"
     model = "RNN_deep5_bi"
 
     x_dim = word2vec_dim
@@ -809,7 +809,7 @@ if __name__ == '__main__':
     w_spread = 0.05  # dim 30=0.1, 300=0.05
     p_drop = 0.2
     epochs = 2000
-    init_rate = 0.0001  # dataset trial=0.01, dev=0.001, train=0.0001
+    init_rate = 0.001  # dataset trial=0.01, dev=0.001, train=0.0001
     decay_after = 5
     decay_rate = 0.8
     decay_min = init_rate * 1e-6
@@ -826,6 +826,17 @@ if __name__ == '__main__':
     rnn = RNN_deep5_bi(x_dim=x_dim, hidden_dim=hidden_dim, y_dim=y_dim, w_spread=w_spread, p_drop=p_drop, activation_f=activation_f, updates_f=updates_f, l1_reg=l1_reg, l2_reg=l2_reg)
     #rnn = RNN_deep3_wide2_bi(x_dim=x_dim, hidden_dim=hidden_dim, y_dim=y_dim, w_spread=w_spread, p_drop=p_drop, activation_f=activation_f, updates_f=updates_f, l1_reg=l1_reg, l2_reg=l2_reg)
     #rnn.load(args.model_dir, "decay_")
+
+    #XXX: split train set into train and development
+    x_all = x_train
+    y_all = y_train
+    split_ratio = 0.7
+    split_ids = np.random.permutation(len(x_all))
+    train_ids, valid_ids = split_ids[:(len(split_ids) * split_ratio)], split_ids[(len(split_ids) * split_ratio):]
+    x_train = map(x_all.__getitem__, train_ids)
+    y_train = map(y_all.__getitem__, train_ids)
+    x_valid = map(x_all.__getitem__, valid_ids)
+    y_valid = map(y_all.__getitem__, valid_ids)
 
     # iterate through train dataset
     log.info("learning and evaluating")
