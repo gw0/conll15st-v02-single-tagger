@@ -19,6 +19,60 @@ import common
 log = common.logging.getLogger(__name__)
 
 
+### Relation tags
+
+tags_rnum1_most5 = [
+    "EntRel:EntRel:1:Arg1",
+    "EntRel:EntRel:1:Arg2",
+    "EntRel:EntRel:1:Connective",
+    "Explicit:Comparison.Contrast:1:Arg1",
+    "Explicit:Comparison.Contrast:1:Arg2",
+    "Explicit:Comparison.Contrast:1:Connective",
+    "Explicit:Comparison:1:Arg1",
+    "Explicit:Comparison:1:Arg2",
+    "Explicit:Comparison:1:Connective",
+    "Explicit:Contingency.Cause.Reason:1:Arg1",
+    "Explicit:Contingency.Cause.Reason:1:Arg2",
+    "Explicit:Contingency.Cause.Reason:1:Connective",
+    "Explicit:Contingency.Condition:1:Arg1",
+    "Explicit:Contingency.Condition:1:Arg2",
+    "Explicit:Contingency.Condition:1:Connective",
+    "Explicit:Expansion.Conjunction:1:Arg1",
+    "Explicit:Expansion.Conjunction:1:Arg2",
+    "Explicit:Expansion.Conjunction:1:Connective",
+    "Explicit:Temporal.Asynchronous.Precedence:1:Arg1",
+    "Explicit:Temporal.Asynchronous.Precedence:1:Arg2",
+    "Explicit:Temporal.Asynchronous.Precedence:1:Connective",
+    "Explicit:Temporal.Asynchronous.Succession:1:Arg1",
+    "Explicit:Temporal.Asynchronous.Succession:1:Arg2",
+    "Explicit:Temporal.Asynchronous.Succession:1:Connective",
+    "Explicit:Temporal.Synchrony:1:Arg1",
+    "Explicit:Temporal.Synchrony:1:Arg2",
+    "Explicit:Temporal.Synchrony:1:Connective",
+    "Implicit:Comparison.Contrast:1:Arg1",
+    "Implicit:Comparison.Contrast:1:Arg2",
+    "Implicit:Comparison.Contrast:1:Connective",
+    "Implicit:Contingency.Cause.Reason:1:Arg1",
+    "Implicit:Contingency.Cause.Reason:1:Arg2",
+    "Implicit:Contingency.Cause.Reason:1:Connective",
+    "Implicit:Contingency.Cause.Result:1:Arg1",
+    "Implicit:Contingency.Cause.Result:1:Arg2",
+    "Implicit:Contingency.Cause.Result:1:Connective",
+    "Implicit:Expansion.Conjunction:1:Arg1",
+    "Implicit:Expansion.Conjunction:1:Arg2",
+    "Implicit:Expansion.Conjunction:1:Connective",
+    "Implicit:Expansion.Instantiation:1:Arg1",
+    "Implicit:Expansion.Instantiation:1:Arg2",
+    "Implicit:Expansion.Instantiation:1:Connective",
+    "Implicit:Expansion.Restatement:1:Arg1",
+    "Implicit:Expansion.Restatement:1:Arg2",
+    "Implicit:Expansion.Restatement:1:Connective",
+    "Implicit:Temporal.Asynchronous.Precedence:1:Arg1",
+    "Implicit:Temporal.Asynchronous.Precedence:1:Arg2",
+    "Implicit:Temporal.Asynchronous.Precedence:1:Connective",
+]
+
+
 ### PDTB parses
 
 class PDTBParsesCorpus(object):

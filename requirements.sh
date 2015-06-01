@@ -9,7 +9,7 @@ SRC="venv/src"
 SITE_PACKAGES='venv/lib/python*/site-packages'
 DIST_PACKAGES='/usr/lib/python*/dist-packages'
 
-virtualenv --prompt="$NAME" venv
+virtualenv --prompt="$NAME" venv || exit 1
 source venv/bin/activate
 [ ! -e "$SRC" ] && mkdir "$SRC"
 
