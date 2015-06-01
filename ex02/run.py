@@ -771,11 +771,11 @@ if __name__ == '__main__':
     word2vec_dim = 300
 
     tag_to_j = {}
-    #tag_to_j["Explicit:Expansion.Conjunction:1:Arg1"] = len(tag_to_j)
-    #tag_to_j["Explicit:Expansion.Conjunction:1:Arg2"] = len(tag_to_j)
-    #tag_to_j["Explicit:Expansion.Conjunction:1:Connective"] = len(tag_to_j)
-    for i, tag in enumerate(data_pdtb.tags_rnum1_most5):
-        tag_to_j[tag] = i
+    tag_to_j["Explicit:Expansion.Conjunction:1:Arg1"] = len(tag_to_j)
+    tag_to_j["Explicit:Expansion.Conjunction:1:Arg2"] = len(tag_to_j)
+    tag_to_j["Explicit:Expansion.Conjunction:1:Connective"] = len(tag_to_j)
+    #for i, tag in enumerate(data_pdtb.tags_rnum1_most5):
+    #    tag_to_j[tag] = i
 
     x_train, y_train, train_doc_ids, train_words, train_relations = load(args.train_dir, word2vec_bin, word2vec_dim, tag_to_j)
     x_valid, y_valid, valid_doc_ids, valid_words, valid_relations = load(args.valid_dir, word2vec_bin, word2vec_dim, tag_to_j)
@@ -798,7 +798,7 @@ if __name__ == '__main__':
     log.info("instantiate model")
     rand_seed = int(time.time())
 
-    experiment = "ex02n"
+    experiment = "ex02p"
     train = "dev-70"
     valid = "dev-30"
     model = "RNN_deep5_bi"
@@ -806,8 +806,8 @@ if __name__ == '__main__':
     x_dim = word2vec_dim
     hidden_dim = 300  #XXX: x_dim
     y_dim = len(tag_to_j)
-    w_spread = 0.05  # dim 30=0.1, 300=0.05
-    p_drop = 0.2
+    w_spread = 0.1  # dim 30=0.1, 300=0.05
+    p_drop = 0.
     epochs = 2000
     init_rate = 0.001  # dataset trial=0.01, dev=0.001, train=0.0001
     decay_after = 5
@@ -843,7 +843,7 @@ if __name__ == '__main__':
     learn_rate = init_rate
     decay_cost = np.inf
     decay_epoch = 0
-    best_f1 = -np.inf
+    best_f1 = 0.
     best_cost = np.inf
     best_epoch = 0
     #best_rnn = rnn
@@ -875,11 +875,24 @@ if __name__ == '__main__':
         y_max_avg /= len(x_train)
         y_mean_avg /= len(x_train)
         log.info("{} learning epoch {} ({:.2f} sec), rate {:.2e}".format(experiment, epoch, epoch_time, learn_rate))
-        log.debug("  train cost {:7.4f} {:7.4f} {:7.4f} (best {:10.8f}) {}, train y {:7.4f} {:7.4f} {:7.4f}".format(float(cost_min), float(cost_max), float(cost_avg), float(decay_cost), ("++" if cost_avg < decay_cost else "  "), float(y_min_avg), float(y_max_avg), float(y_mean_avg)))
+        log.debug("  train cost {:7.4f} {:7.4f} {:7.4f} (best {:10.8f}) {}, train y {:7.4f} {:7.4f} {:7.4f}".format(float(cost_min), float(cost_max), float(cost_avg), float(cost_avg if cost_avg < decay_cost else decay_cost), ("++" if cost_avg < decay_cost else "  "), float(y_min_avg), float(y_max_avg), float(y_mean_avg)))
         if cost_avg < decay_cost:
             decay_cost = cost_avg
             decay_epoch = epoch
             rnn.save(args.model_dir, "decay_")
+
+        #XXX: estimate training model
+        if epoch % valid_freq == 0:
+            y_relations = []
+            for i, (x, y, words) in enumerate(zip(x_train, y_train, train_words_list)):
+                y_pred = rnn.predict(x)
+
+                # extract relations from current document
+                y_relations.extend(extract_relations(y_pred, tag_to_j, words))
+
+            # evaluate all relations
+            precision, recall, f1 = scorer.evaluate_relation(train_relations_list, y_relations)
+            log.info("  train precision {:7.4f} recall {:7.4f}, f1 {:7.4f}".format(precision, recall, f1))
 
         # validate model
         if epoch % valid_freq == 0:
@@ -892,7 +905,7 @@ if __name__ == '__main__':
 
             # evaluate all relations
             precision, recall, f1 = scorer.evaluate_relation(valid_relations_list, y_relations)
-            log.info("  valid precision {:7.4f} recall {:7.4f}, f1 {:7.4f} (best {:10.8f}) {}".format(precision, recall, f1, best_f1, ("++" if f1 > best_f1 else "  ")))
+            log.info("  valid precision {:7.4f} recall {:7.4f}, f1 {:7.4f} (best {:10.8f}) {}".format(precision, recall, f1, (f1 if f1 > best_f1 else best_f1), ("++" if f1 > best_f1 else "  ")))
             if f1 > best_f1:  # save best model
                 best_f1 = f1
                 best_epoch = epoch
