@@ -1,0 +1,300 @@
+Problemi:
+
+- argument 1 ali 2 ali veznik lahko imajo luknje (lahko del veznika na zacetku, del na koncu), tagging
+- ena relacija podmnozica druge (tudi iste)
+- arg1 na zacetku, arg2 dalec proti koncu
+
+
+wsj_1000 - [4564, 4610]
+=======================
+
+[But]_arg2
+*if*
+[this prompts others to consider the same thing]_arg1
+,
+*then*
+[it may become much more important]_arg2
+.
+
+( (S (CC But)
+     (SBAR
+       (IN if)
+       (S (NP (DT this)) (VP (VBZ prompts) (S (NP (NNS others)) (VP (TO to) (VP (VB consider) (NP (DT the) (JJ same) (NN thing)))))))
+     )
+     (, ,)
+     (ADVP (RB then))
+     (NP (PRP it)) (VP (MD may) (VP (VB become) (ADJP (ADVP (RB much) (RBR more)) (JJ important))))
+     (. .)
+) )
+
+[['cc', 'important-18', 'But-1'],
+ ['mark', 'prompts-4', 'if-2'],
+ ['nsubj', 'prompts-4', 'this-3'],
+ ['advcl', 'important-18', 'prompts-4'],
+ ['nsubj', 'consider-7', 'others-5'],
+ ['aux', 'consider-7', 'to-6'],
+ ['xcomp', 'prompts-4', 'consider-7'],
+ ['det', 'thing-10', 'the-8'],
+ ['amod', 'thing-10', 'same-9'],
+ ['dobj', 'consider-7', 'thing-10'],
+ ['advmod', 'important-18', 'then-12'],
+ ['nsubj', 'important-18', 'it-13'],
+ ['aux', 'important-18', 'may-14'],
+ ['cop', 'important-18', 'become-15'],
+ ['advmod', 'more-17', 'much-16'],
+ ['advmod', 'important-18', 'more-17'],
+ ['root', 'ROOT-0', 'important-18']]
+
+{u'Arg1': {
+   u'CharacterSpanList': [[4564, 4610]],
+   u'RawText': u'this prompts others to consider the same thing',
+   u'TokenList': [[4564, 4568, 879, 32, 2],
+    [4569, 4576, 880, 32, 3],
+    [4577, 4583, 881, 32, 4],
+    [4584, 4586, 882, 32, 5],
+    [4587, 4595, 883, 32, 6],
+    [4596, 4599, 884, 32, 7],
+    [4600, 4604, 885, 32, 8],
+    [4605, 4610, 886, 32, 9]]},
+  u'Arg2': {
+   u'CharacterSpanList': [[4557, 4560], [4617, 4650]],
+   u'RawText': u'But it may become much more important',
+   u'TokenList': [[4557, 4560, 877, 32, 0],
+    [4617, 4619, 889, 32, 12],
+    [4620, 4623, 890, 32, 13],
+    [4624, 4630, 891, 32, 14],
+    [4631, 4635, 892, 32, 15],
+    [4636, 4640, 893, 32, 16],
+    [4641, 4650, 894, 32, 17]]},
+  u'Connective': {u'CharacterSpanList': [[4561, 4563], [4612, 4616]],
+   u'RawText': u'if then',
+   u'TokenList': [[4561, 4563, 878, 32, 1], [4612, 4616, 888, 32, 11]]},
+  u'DocID': u'wsj_1000',
+  u'ID': 14905,
+  u'Sense': [u'Contingency.Condition'],
+  u'Type': u'Explicit'}
+
+
+wsj_1000 - [4485, 4555]
+=======================
+
+He added
+[that "having just one firm do this isn't going to mean a hill of beans]_arg1
+.
+*But*
+[if this prompts others to consider the same thing, then it may become much more important]_arg2
+.
+
+( (S (NP (PRP He)) (VP (VBD added)
+                       (SBAR (IN that) (`` ``) (S (S (VP (VBG having) (S (NP (RB just) (CD one) (NN firm)) (VP (VB do) (NP (DT this)))))) (VP (VBZ is) (RB n't) (VP (VBG going) (S (VP (TO to) (VP (VB mean) (NP (NP (DT a) (NN hill)) (PP (IN of) (NP (NNS beans)
+))))))))))) (. .)) )
+
+[['nsubj', 'added-2', 'He-1'],
+ ['root', 'ROOT-0', 'added-2'],
+ ['mark', 'going-13', 'that-3'],
+ ['csubj', 'going-13', 'having-5'],
+ ['advmod', 'firm-8', 'just-6'],
+ ['num', 'firm-8', 'one-7'],
+ ['nsubj', 'do-9', 'firm-8'],
+ ['ccomp', 'having-5', 'do-9'],
+ ['dobj', 'do-9', 'this-10'],
+ ['aux', 'going-13', 'is-11'],
+ ['neg', 'going-13', "n't-12"],
+ ['ccomp', 'added-2', 'going-13'],
+ ['aux', 'mean-15', 'to-14'],
+ ['xcomp', 'going-13', 'mean-15'],
+ ['det', 'hill-17', 'a-16'],
+ ['dobj', 'mean-15', 'hill-17'],
+ ['prep', 'hill-17', 'of-18'],
+ ['pobj', 'of-18', 'beans-19']]
+[['cc', 'important-18', 'But-1'],
+ ['mark', 'prompts-4', 'if-2'],
+ ['nsubj', 'prompts-4', 'this-3'],
+ ['advcl', 'important-18', 'prompts-4'],
+ ['nsubj', 'consider-7', 'others-5'],
+ ['aux', 'consider-7', 'to-6'],
+ ['xcomp', 'prompts-4', 'consider-7'],
+ ['det', 'thing-10', 'the-8'],
+ ['amod', 'thing-10', 'same-9'],
+ ['dobj', 'consider-7', 'thing-10'],
+ ['advmod', 'important-18', 'then-12'],
+ ['nsubj', 'important-18', 'it-13'],
+ ['aux', 'important-18', 'may-14'],
+ ['cop', 'important-18', 'become-15'],
+ ['advmod', 'more-17', 'much-16'],
+ ['advmod', 'important-18', 'more-17'],
+ ['root', 'ROOT-0', 'important-18']]
+
+{'Arg1': {'CharacterSpanList': [[4485, 4555]],
+  'RawText': 'that "having just one firm do this isn\'t going to mean a hill of beans',
+  'TokenList': [[4485, 4489, 859, 31, 2],
+   [4490, 4491, 860, 31, 3],
+   [4491, 4497, 861, 31, 4],
+   [4498, 4502, 862, 31, 5],
+   [4503, 4506, 863, 31, 6],
+   [4507, 4511, 864, 31, 7],
+   [4512, 4514, 865, 31, 8],
+   [4515, 4519, 866, 31, 9],
+   [4520, 4522, 867, 31, 10],
+   [4522, 4525, 868, 31, 11],
+   [4526, 4531, 869, 31, 12],
+   [4532, 4534, 870, 31, 13],
+   [4535, 4539, 871, 31, 14],
+   [4540, 4541, 872, 31, 15],
+   [4542, 4546, 873, 31, 16],
+   [4547, 4549, 874, 31, 17],
+   [4550, 4555, 875, 31, 18]]},
+ 'Arg2': {'CharacterSpanList': [[4561, 4650]],
+  'RawText': 'if this prompts others to consider the same thing, then it may become much more important',
+  'TokenList': [[4561, 4563, 878, 32, 1],
+   [4564, 4568, 879, 32, 2],
+   [4569, 4576, 880, 32, 3],
+   [4577, 4583, 881, 32, 4],
+   [4584, 4586, 882, 32, 5],
+   [4587, 4595, 883, 32, 6],
+   [4596, 4599, 884, 32, 7],
+   [4600, 4604, 885, 32, 8],
+   [4605, 4610, 886, 32, 9],
+   [4610, 4611, 887, 32, 10],
+   [4612, 4616, 888, 32, 11],
+   [4617, 4619, 889, 32, 12],
+   [4620, 4623, 890, 32, 13],
+   [4624, 4630, 891, 32, 14],
+   [4631, 4635, 892, 32, 15],
+   [4636, 4640, 893, 32, 16],
+   [4641, 4650, 894, 32, 17]]},
+ 'Connective': {'CharacterSpanList': [[4557, 4560]],
+  'RawText': 'But',
+  'TokenList': [[4557, 4560, 877, 32, 0]]},
+ 'DocID': 'wsj_1000',
+ 'ID': 14904,
+ 'Sense': ['Comparison.Concession'],
+ 'Type': 'Explicit'}
+
+
+wsj_0807 - [1411, 1622]
+=======================
+
+In addition, Black & Decker had said it would sell two other undisclosed Emhart operations if it received the right price.
+[Bostic is one of the previously unnamed units, and the first of the five to be sold.]_arg1 
+
+[The company is still negotiating the sales of the other four units and expects to announce agreements by the end of the year]_arg1.
+[The five units generated sales of about $1.3 billion in 1988, almost half of Emhart's $2.3 billion revenue]_arg2.
+Bostic posted 1988 sales of $255 million. 
+
+
+{
+  "DocID": "wsj_0807",
+  "Arg1": {
+    "CharacterSpanList": [[1411, 1622]],
+    "RawText": "Bostic is one of the previously unnamed units, and the first of the five to be sold.The company is still negotiating the sales of the other four units and expects to announce agreements by the end of the year",
+    "TokenList": [
+      [  1411,  1417,  263,  11,  0],
+      [  1418,  1420,  264,  11,  1],
+      [  1421,  1424,  265,  11,  2],
+      [  1425,  1427,  266,  11,  3],
+      [  1428,  1431,  267,  11,  4],
+      [  1432,  1442,  268,  11,  5],
+      [  1443,  1450,  269,  11,  6],
+      [  1451,  1456,  270,  11,  7],
+      [  1456,  1457,  271,  11,  8],
+      [  1458,  1461,  272,  11,  9],
+      [  1462,  1465,  273,  11,  10],
+      [  1466,  1471,  274,  11,  11],
+      [  1472,  1474,  275,  11,  12],
+      [  1475,  1478,  276,  11,  13],
+      [  1479,  1483,  277,  11,  14],
+      [  1484,  1486,  278,  11,  15],
+      [  1487,  1489,  279,  11,  16],
+      [  1490,  1494,  280,  11,  17],
+      [  1494,  1495,  281,  11,  18],
+      [  1498,  1501,  282,  12,  0],
+      [  1502,  1509,  283,  12,  1],
+      [  1510,  1512,  284,  12,  2],
+      [  1513,  1518,  285,  12,  3],
+      [  1519,  1530,  286,  12,  4],
+      [  1531,  1534,  287,  12,  5],
+      [  1535,  1540,  288,  12,  6],
+      [  1541,  1543,  289,  12,  7],
+      [  1544,  1547,  290,  12,  8],
+      [  1548,  1553,  291,  12,  9],
+      [  1554,  1558,  292,  12,  10],
+      [  1559,  1564,  293,  12,  11],
+      [  1565,  1568,  294,  12,  12],
+      [  1569,  1576,  295,  12,  13],
+      [  1577,  1579,  296,  12,  14],
+      [  1580,  1588,  297,  12,  15],
+      [  1589,  1599,  298,  12,  16],
+      [  1600,  1602,  299,  12,  17],
+      [  1603,  1606,  300,  12,  18],
+      [  1607,  1610,  301,  12,  19],
+      [  1611,  1613,  302,  12,  20],
+      [  1614,  1617,  303,  12,  21],
+      [  1618,  1622,  304,  12,  22]
+    ]
+  },
+  "Arg2": {
+    "CharacterSpanList": [[1624, 1730]],
+    "RawText": "The five units generated sales of about $1.3 billion in 1988, almost half of Emhart's $2.3 billion revenue",
+    "TokenList": [
+      [  1624,  1627,  306,  13,  0],
+      [  1628,  1632,  307,  13,  1],
+      [  1633,  1638,  308,  13,  2],
+      [  1639,  1648,  309,  13,  3],
+      [  1649,  1654,  310,  13,  4],
+      [  1655,  1657,  311,  13,  5],
+      [  1658,  1663,  312,  13,  6],
+      [  1664,  1665,  313,  13,  7],
+      [  1665,  1668,  314,  13,  8],
+      [  1669,  1676,  315,  13,  9],
+      [  1677,  1679,  316,  13,  10],
+      [  1680,  1684,  317,  13,  11],
+      [  1684,  1685,  318,  13,  12],
+      [  1686,  1692,  319,  13,  13],
+      [  1693,  1697,  320,  13,  14],
+      [  1698,  1700,  321,  13,  15],
+      [  1701,  1707,  322,  13,  16],
+      [  1707,  1709,  323,  13,  17],
+      [  1710,  1711,  324,  13,  18],
+      [  1711,  1714,  325,  13,  19],
+      [  1715,  1722,  326,  13,  20],
+      [  1723,  1730,  327,  13,  21]
+    ]
+  },
+  "Connective": {
+    "CharacterSpanList": [],
+    "RawText": ""
+  },
+  "Sense": ["EntRel"],
+  "Type": "EntRel",
+  "ID": 12886
+}
+
+
+wsj_1000 - [2447, 2552]
+=======================
+
+While Mr. Timbers explained he's "not totally convinced index arbitrage changes the overall level of the stock market," he said that "on an intraday basis, it has major effects.
+We've talked to proponents
+
+of index arbitrage
+[and told them to cool it]_arg1
+*because*
+**Contingency.Cause.Reason**
+[they're ruining the market]_arg2
+.
+They said
+
+, `Too bad, ' so we finally said we're not going to do business with them."
+
+
+wsj_1000 - [[9, 179]]-[[2641, 2647], [2653, 2741]]
+==================================================
+
+"Arg1": {"CharacterSpanList": [[9, 179]], "RawText": "Kemper Financial Services Inc., charging that program trading is ruining the stock market, cut off four big Wall Street firms from doing any of its stock-trading business", "TokenList": [[9, 15, 0, 0, 0], [16, 25, 1, 0, 1], [26, 34, 2, 0, 2], [35, 39, 3, 0, 3], [39, 40, 4, 0, 4], [41, 49, 5, 0, 5], [50, 54, 6, 0, 6], [55, 62, 7, 0, 7], [63, 70, 8, 0, 8], [71, 73, 9, 0, 9], [74, 81, 10, 0, 10], [82, 85, 11, 0, 11], [86, 91, 12, 0, 12], [92, 98, 13, 0, 13], [98, 99, 14, 0, 14], [100, 103, 15, 0, 15], [104, 107, 16, 0, 16], [108, 112, 17, 0, 17], [113, 116, 18, 0, 18], [117, 121, 19, 0, 19], [122, 128, 20, 0, 20], [129, 134, 21, 0, 21], [135, 139, 22, 0, 22], [140, 145, 23, 0, 23], [146, 149, 24, 0, 24], [150, 152, 25, 0, 25], [153, 156, 26, 0, 26], [157, 170, 27, 0, 27], [171, 179, 28, 0, 28]]},
+"Arg2": {"CharacterSpanList": [[2641, 2647], [2653, 2741]], "RawText": "Kemper blasted the Big Board for ignoring the interests of individual and institutional holders", "TokenList": [[2641, 2647, 501, 17, 0], [2653, 2660, 503, 17, 2], [2661, 2664, 504, 17, 3], [2665, 2668, 505, 17, 4], [2669, 2674, 506, 17, 5], [2675, 2678, 507, 17, 6], [2679, 2687, 508, 17, 7], [2688, 2691, 509, 17, 8], [2692, 2701, 510, 17, 9], [2702, 2704, 511, 17, 10], [2705, 2715, 512, 17, 11], [2716, 2719, 513, 17, 12], [2720, 2733, 514, 17, 13], [2734, 2741, 515, 17, 14]]},
+"Connective": {"CharacterSpanList": [[2648, 2652]], "RawText": "also", "TokenList": [[2648, 2652, 502, 17, 1]]},
+"DocID": "wsj_1000",
+"ID": 14890,
+"Sense": ["Expansion.Conjunction"],
+"Type": "Explicit"
