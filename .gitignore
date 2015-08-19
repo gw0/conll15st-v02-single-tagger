@@ -1,0 +1,10 @@
+.*
+*.pyc
+*.gz
+*.tgz
+venv
+cache
+conll15-st-*
+mesnilgr-*
+socher-*
+scorer
