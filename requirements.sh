@@ -30,6 +30,10 @@ pip install theano
 pip install tabulate
 pip install matplotlib
 
+# Data
+echo "Downloading 'GoogleNews-vectors-negative300.bin.gz'..."
+[ ! -e 'GoogleNews-vectors-negative300.bin.gz' ] && x-www-browser 'https://drive.google.com/file/d/0B7XkCwpI5KDYNlNUTTlSS21pQmM/edit?usp=sharing'
+
 echo
 echo "Use: . venv/bin/activate"
 echo
