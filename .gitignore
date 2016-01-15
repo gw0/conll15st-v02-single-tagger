@@ -4,7 +4,5 @@
 *.tgz
 venv
 cache
-conll15-st-*
-mesnilgr-*
-socher-*
+docs/CoNLL_2015_Eval_Agreement.*
 scorer
