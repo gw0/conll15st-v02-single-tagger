@@ -1,5 +1,5 @@
-conll15st-single-tagging-theano
-===============================
+conll15st-single-tagger-v02
+===========================
 
 Experiments for CoNLL 2015 Shared Task (Shallow Discourse Parsing) involving a single task of tagging discourse spans using deep bidirectional recurrent neural networks in Theano.
 
@@ -7,7 +7,11 @@ Experiments for CoNLL 2015 Shared Task (Shallow Discourse Parsing) involving a s
 
 - <http://www.cs.brandeis.edu/~clp/conll15st/>
 - <http://github.com/attapol/conll15st/>
-- <http://github.com/gw0/conll15st-single-tagging-theano/>
+- <http://github.com/gw0/conll15st-single-tagger-v02/>
+
+If you find anything useful, consider citing a **related conference paper**:
+
+- <http://gw.tnode.com/deep-learning/acl2015-learning-representations-for-text-level-discourse-parsing/>
 
 
 License
