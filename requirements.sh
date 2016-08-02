@@ -1,5 +1,5 @@
 #!/bin/bash
-# Requirements installation for conll2015
+# Requirements installation for conll2015st-v02-single-tagger
 #
 # Author: gw0 [http://gw.tnode.com/] <gw.2015@tnode.com>
 # License: All rights reserved
